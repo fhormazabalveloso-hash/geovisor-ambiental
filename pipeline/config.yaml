@@ -1,0 +1,222 @@
+# Catálogo de capas del Geovisor Ambiental — configuración del pipeline de datos.
+#
+# `data_raw_root` apunta a la carpeta de descargas ya organizada por Cristian
+# (fuera del repo, no se copia dentro de data-raw/ para no duplicar ~8 GB).
+# Cada `fuente` es relativa a `data_raw_root`. Si una capa tiene varias
+# `fuente` (p. ej. peninsula+Baleares y Canarias en ficheros separados), el
+# pipeline las fusiona y reproyecta a EPSG:4326 antes de tesela.
+#
+# nivel: 1 (afección jurídica plena) / 2 (estimada, con matiz) / 3 (contexto)
+#   — ver README.md §5.
+#
+# TODO Francisco: revisar sobre todo las capas marcadas "# revisar:" — son
+# ficheros presentes en la carpeta origen cuyo significado exacto (qué
+# distingue *_c / *_p / *_pb, o los prefijos A_/Ca_/M_) he inferido por el
+# nombre, no por metadato confirmado.
+
+data_raw_root: "C:\\Users\\francisco.hormazabal.QUADRANTE-ENG\\OneDrive - GRUPO QUADRANTE\\Archivos de Cristian Danilo Hernández López - 2 Medio Ambiente\\z Shapefiles\\24-ign-miteco-escala-nacional"
+output_dir: "..\\data-web"
+
+layers:
+  # ---------------------------------------------------------------------
+  # NIVEL 1 — afección jurídica plena (cruce automático obligatorio)
+  # ---------------------------------------------------------------------
+  - id: red_natura_2000
+    nombre: "Red Natura 2000 (ZEC + ZEPA)"
+    tematica: espacios_protegidos
+    nivel: 1
+    fuente:
+      - "04_espacios_protegidos\\n2000_2025_GeoJson\\n2000_spatial_es_pibal_proy_end25.geojson"
+      - "04_espacios_protegidos\\n2000_2025_GeoJson\\n2000_spatial_es_can_proy_end25.geojson"
+    minzoom: 0
+    maxzoom: 14
+
+  - id: enp
+    nombre: "Espacios Naturales Protegidos (ENP)"
+    tematica: espacios_protegidos
+    nivel: 1
+    # revisar: Enp2025_c.json (16.9 MB, probablemente centroides/puntos) y
+    # Enp2025_p.json (189.9 MB, poligonos) — se tesela solo el poligono;
+    # el fichero de centroides no aporta geometria de afeccion.
+    fuente:
+      - "04_espacios_protegidos\\Enp2025_geojson\\Enp2025_p.json"
+    minzoom: 0
+    maxzoom: 14
+
+  - id: vias_pecuarias
+    nombre: "Vías Pecuarias (Red General - RGVP)"
+    tematica: patrimonio_natural
+    nivel: 1
+    fuente:
+      - "05_patrimonio_natural\\RGVP_Geojson\\RGVP_BDN_2024.geojson"
+    minzoom: 0
+    maxzoom: 15
+
+  - id: montes_utilidad_publica
+    nombre: "Montes de Utilidad Pública (CMUP/IEPF)"
+    tematica: patrimonio_natural
+    nivel: 1
+    # revisar: IEPF_CMUP_c.geojson (7.7 MB, centroides) vs IEPF_CMUP_pb.geojson
+    # (1.19 GB, poligono base) — se tesela el poligono. Fichero grande: primer
+    # candidato a simplificacion agresiva si el .pmtiles resultante pesa
+    # demasiado para Git (ver pipeline/README.md).
+    fuente:
+      - "05_patrimonio_natural\\IEPF_CMUP_GeoJson\\IEPF_CMUP_pb.geojson"
+    minzoom: 0
+    maxzoom: 13
+
+  - id: dph_deslindado
+    nombre: "DPH deslindado"
+    tematica: hidrografia
+    nivel: 1
+    fuente:
+      - "02_hidrografia\\dph-deslindado\\DPH_DESLINDADO_20250319.shp"
+    minzoom: 0
+    maxzoom: 15
+
+  - id: iezh
+    nombre: "Inventario Español de Zonas Húmedas (IEZH)"
+    tematica: hidrografia
+    nivel: 1
+    fuente:
+      - "05_patrimonio_natural\\IEZH_GeoJson_2025\\IEZH_P_2025.json"
+    minzoom: 0
+    maxzoom: 14
+
+  # ---------------------------------------------------------------------
+  # NIVEL 2 — afección estimada / con matiz (cruce con etiqueta metodológica)
+  # ---------------------------------------------------------------------
+  - id: dph_cartografico_probable
+    nombre: "DPH cartográfico probable (Proyecto LINDE)"
+    tematica: hidrografia
+    nivel: 2
+    # Fichero de 1.15 GB — candidato a simplificacion / maxzoom reducido.
+    fuente:
+      - "02_hidrografia\\dph-cartografico-probable\\DHP_PenBalCan_20260421.shp"
+    minzoom: 0
+    maxzoom: 13
+
+  - id: laminas_inundacion_t10
+    nombre: "Lámina de inundación T10"
+    tematica: inundabilidad
+    nivel: 2
+    fuente:
+      - "03_inundabilidad\\laminasPB-q10\\Q10_2Ciclo_PB_20260114.shp"
+    minzoom: 0
+    maxzoom: 12
+
+  - id: laminas_inundacion_t100
+    nombre: "Lámina de inundación T100"
+    tematica: inundabilidad
+    nivel: 2
+    fuente:
+      - "03_inundabilidad\\laminasPB-q100\\Q100_2Ciclo_PB_20260114.shp"
+    minzoom: 0
+    maxzoom: 12
+
+  - id: laminas_inundacion_t500
+    nombre: "Lámina de inundación T500"
+    tematica: inundabilidad
+    nivel: 2
+    fuente:
+      - "03_inundabilidad\\laminasPB-q500\\Q500_2Ciclo_PB_20260114.shp"
+    minzoom: 0
+    maxzoom: 12
+
+  - id: red_hidrografica
+    nombre: "Red hidrográfica (Pfafstetter)"
+    tematica: hidrografia
+    nivel: 2
+    # revisar: prefijos A_ / Ca_ / M_ (probablemente vertiente
+    # Atlantica/Canarias/Mediterranea) — se fusionan en una sola capa.
+    fuente:
+      - "02_hidrografia\\RiosCompPfafs\\A_RiosCompletosv2.shp"
+      - "02_hidrografia\\RiosCompPfafs\\Ca_RiosCompletosv2.shp"
+      - "02_hidrografia\\RiosCompPfafs\\M_RiosCompletosv2.shp"
+    minzoom: 0
+    maxzoom: 13
+
+  - id: hic
+    nombre: "Hábitats de Interés Comunitario (HIC)"
+    tematica: espacios_protegidos
+    nivel: 2
+    fuente:
+      - "04_espacios_protegidos\\HIC\\ESArt17_HabitDistrib.shp"
+    minzoom: 0
+    maxzoom: 12
+
+  - id: humedales_turberas
+    nombre: "Humedales y turberas (complementario a IEZH)"
+    tematica: hidrografia
+    nivel: 2
+    # revisar: capa no listada explicitamente en README §5 — confirmar con
+    # Cristian si complementa o sustituye a IEZH, y si tiene validez propia
+    # o es solo inventario cientifico (en cuyo caso seria Nivel 3).
+    fuente:
+      - "04_espacios_protegidos\\Humedales_Turberas\\Humedal_TurberaBCAM2_2025.shp"
+    minzoom: 0
+    maxzoom: 14
+
+  # ---------------------------------------------------------------------
+  # NIVEL 3 — contexto e información complementaria (activable)
+  # ---------------------------------------------------------------------
+  - id: iba
+    nombre: "IBA — Áreas Importantes para las Aves"
+    tematica: contexto
+    nivel: 3
+    fuente:
+      - "04_espacios_protegidos\\IBA_España_2025_11_05.gpkg"
+    minzoom: 0
+    maxzoom: 13
+
+  - id: nucleos_urbanos
+    nombre: "Núcleos urbanos"
+    tematica: contexto
+    nivel: 3
+    # 7 ficheros GPKG repartidos por codigo de provincia/CCAA (IGRPO). Se
+    # fusionan en una sola capa nacional.
+    fuente:
+      - "01_base_territorial\\Nucleos urbanos\\IGRPO_v2024_13_ETRS89_20251016.gpkg"
+      - "01_base_territorial\\Nucleos urbanos\\IGRPO_v2024_14_ETRS89_20251016.gpkg"
+      - "01_base_territorial\\Nucleos urbanos\\IGRPO_v2024_18_ETRS89_20251016.gpkg"
+      - "01_base_territorial\\Nucleos urbanos\\IGRPO_v2024_28_ETRS89_20251016.gpkg"
+      - "01_base_territorial\\Nucleos urbanos\\IGRPO_v2024_29_ETRS89_20251016.gpkg"
+      - "01_base_territorial\\Nucleos urbanos\\IGRPO_v2024_41_ETRS89_20251016.gpkg"
+      - "01_base_territorial\\Nucleos urbanos\\IGRPO_v2024_45_ETRS89_20251016.gpkg"
+    minzoom: 6
+    maxzoom: 14
+
+  - id: limites_municipales
+    nombre: "Líneas límite municipales"
+    tematica: contexto
+    nivel: 3
+    fuente:
+      - "01_base_territorial\\lineas_limite\\SHP_ETRS89\\ll_municipales\\ll_municipales_inspire_peninbal_etrs89.shp"
+      - "01_base_territorial\\lineas_limite\\SHP_REGCAN95\\ll_municipales\\ll_municipales_inspire_canarias_regcan95.shp"
+    minzoom: 4
+    maxzoom: 14
+
+  - id: limites_provinciales
+    nombre: "Líneas límite provinciales"
+    tematica: contexto
+    nivel: 3
+    fuente:
+      - "01_base_territorial\\lineas_limite\\SHP_ETRS89\\ll_provinciales\\ll_provinciales_inspire_peninbal_etrs89.shp"
+      - "01_base_territorial\\lineas_limite\\SHP_REGCAN95\\ll_provinciales\\ll_provinciales_inspire_canarias_regcan95.shp"
+    minzoom: 0
+    maxzoom: 12
+
+  - id: limites_autonomicos
+    nombre: "Líneas límite autonómicas"
+    tematica: contexto
+    nivel: 3
+    fuente:
+      - "01_base_territorial\\lineas_limite\\SHP_ETRS89\\ll_autonomicas\\ll_autonomicas_inspire_peninbal_etrs89.shp"
+      - "01_base_territorial\\lineas_limite\\SHP_REGCAN95\\ll_autonomicas\\ll_autonomicas_inspire_canarias_regcan95.shp"
+    minzoom: 0
+    maxzoom: 11
+
+  # revisar: vegetacion_so (Vegetacion_10_SE.shp, Vegetacion_10_SO.shp) no
+  # esta en el catalogo del README y solo cubre 2 hojas regionales (no es
+  # cobertura nacional) — se deja fuera del pipeline hasta confirmar alcance
+  # y si hace falta el resto de hojas.
