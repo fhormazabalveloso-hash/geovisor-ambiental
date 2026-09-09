@@ -1,0 +1,14 @@
+# Datos pesados en bruto — nunca se versionan (ver README §4)
+data-raw/
+
+# Formatos de datos SIG pesados, por si aparecen fuera de data-raw/
+*.gpkg
+*.tif
+*.tiff
+*.gdb/
+
+# Sistema / editor
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
