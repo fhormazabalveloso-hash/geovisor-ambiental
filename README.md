@@ -47,6 +47,18 @@ Este documento se centra en el **Componente 1**.
   GitHub**, con **despliegue en GitHub Pages** y, muy probablemente,
   migración a **MapLibre GL JS + teselas vectoriales** para manejar datos
   nacionales con fluidez.
+- **(2026-09-09) Decisión cerrada: MapLibre GL JS + PMTiles.** Leaflet no
+  escala bien con datasets nacionales de miles de features (renderiza
+  geometría a geometría vía SVG/Canvas); MapLibre renderiza teselas
+  vectoriales por WebGL. Se usa **PMTiles** (formato de un solo archivo,
+  servido por HTTP range requests) porque encaja exactamente con
+  *zero-server*: GitHub Pages sirviendo un `.pmtiles` es toda la
+  infraestructura de teselas necesaria, sin servidor de teselas. Pipeline:
+  QGIS/GDAL → **tippecanoe** (`.mbtiles`) → `pmtiles convert` (`.pmtiles`).
+  Las capas WMS/WMTS de referencia (PNOA, IGN, Catastro) se mantienen como
+  *raster source* en MapLibre. Migración de plugins: `leaflet-omnivore` →
+  `@tmcw/togeojson` (KML/GPX); dibujo/edición → `mapbox-gl-draw`. `shpjs` y
+  `Turf.js` no cambian (agnósticos del motor de mapa).
 
 ---
 
@@ -73,10 +85,10 @@ catálogo nacional descargado             conversión,          teselas vectoria
 
 **Stack tecnológico (código abierto):**
 
-- Motor de mapa: **MapLibre GL JS** (objetivo) / Leaflet (versión actual)
+- Motor de mapa: **MapLibre GL JS** (decidido 2026-09-09; sustituye a Leaflet)
 - Análisis espacial client-side: **Turf.js**
-- Lectura de archivos: shpjs (SHP en ZIP), leaflet-omnivore (KML/GPX)
-- Datos: GeoJSON / teselas vectoriales (MBTiles/PMTiles)
+- Lectura de archivos: shpjs (SHP en ZIP), @tmcw/togeojson (KML/GPX), mapbox-gl-draw (dibujo/edición)
+- Datos: teselas vectoriales **PMTiles** (vía tippecanoe + pmtiles CLI) / GeoJSON recortado para capas pequeñas
 - Versionado: **Git + GitHub**
 - Despliegue: **GitHub Pages**
 - Preparación de datos: QGIS + Python (GDAL/ogr2ogr, tippecanoe para teselas)
@@ -214,9 +226,9 @@ sigue saliendo de QGIS**; el visor acelera el paso previo (análisis + datos).
 
 ## 9. Estado y próximos pasos
 
-- [ ] Inicializar proyecto: estructura de carpetas + `git init` + `.gitignore`
-- [ ] Primer commit con este README
-- [ ] Decidir arquitectura definitiva (MapLibre + teselas vs Leaflet + carga por zona)
+- [x] Inicializar proyecto: estructura de carpetas + `git init` + `.gitignore`
+- [x] Primer commit con este README
+- [x] Decidir arquitectura definitiva → **MapLibre GL JS + PMTiles** (ver §2 y §3)
 - [ ] Montar pipeline de conversión del catálogo nacional a formato web
 - [ ] Migrar el visor actual (v4 Andalucía) a la estructura nueva
 - [ ] Construir cajetín Quadrante (logo + flecha norte + escala fija + retícula UTM)
