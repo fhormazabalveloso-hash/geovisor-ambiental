@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Geovisor Ambiental — Quadrante</title>
+
+  <link href="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.css" rel="stylesheet" />
+  <link href="css/style.css" rel="stylesheet" />
+</head>
+<body>
+  <div id="app">
+    <div id="map-container">
+      <div id="map"></div>
+
+      <div id="layer-panel-container">
+        <div id="panel-header">
+          <span>Capas ambientales</span>
+          <button id="panel-toggle" title="Mostrar/ocultar">▾</button>
+        </div>
+        <div id="layer-panel"></div>
+      </div>
+
+      <div id="basemap-switcher">
+        <label><input type="radio" name="basemap" value="pnoa" checked> PNOA (ortofoto)</label>
+        <label><input type="radio" name="basemap" value="osm"> OpenStreetMap</label>
+      </div>
+
+      <img id="north-arrow" src="assets/NORTE.svg" alt="Norte" />
+    </div>
+
+    <div id="cajetin">
+      <div class="logo"><img src="assets/QDE_META_White.svg" alt="Quadrante" /></div>
+      <div class="titulo">
+        <strong>Geovisor Ambiental — Análisis de afecciones</strong>
+        <span>Prototipo de trabajo — no sustituye a la cartografía QGIS final</span>
+      </div>
+      <div class="fuente">
+        Elaboración propia a partir de MITECO / IGN · ETRS89 / EPSG:4326 (visor) · EPSG:25830 (QGIS)
+      </div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.js"></script>
+  <script src="https://unpkg.com/pmtiles@3/dist/pmtiles.js"></script>
+  <script src="js/layers.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
