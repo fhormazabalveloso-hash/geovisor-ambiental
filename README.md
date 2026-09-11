@@ -234,10 +234,18 @@ sigue saliendo de QGIS**; el visor acelera el paso previo (análisis + datos).
       en `data-web/*.pmtiles`; quedan pendientes las 5 capas grandes
       (inundabilidad T10/T100/T500, DPH cartográfico probable, montes de
       utilidad pública), en tanda aparte por su tamaño de origen (1-1.9 GB)
-- [ ] Migrar el visor actual (v4 Andalucía) a la estructura nueva
-- [ ] Construir cajetín Quadrante (logo + flecha norte + escala fija + retícula UTM)
+- [x] Primer visor funcional: MapLibre GL JS + PMTiles, mapa base
+      conmutable (PNOA/OSM), panel de capas por nivel, cajetín Quadrante
+      (logo + flecha norte + escala + fuente/CRS). Falta migrar el resto
+      de comportamiento del visor v4 Andalucía (subida de tramo, buffer,
+      análisis).
+- [x] Configurar despliegue en GitHub Pages —
+      https://fhormazabalveloso-hash.github.io/geovisor-ambiental/src/index.html
+      (repo público, rama `main`). Peticiones de rango HTTP verificadas
+      funcionando en el CDN real de GitHub Pages (Fastly), no solo en
+      local.
+- [ ] Subida de tramo/punto (SHP/KML/GeoJSON) + buffer de afección
 - [ ] Desarrollar análisis **cuantitativo** de afecciones (m, ha, PK)
 - [ ] Exportación de tabla de afecciones a Excel/Word
-- [ ] Configurar despliegue en GitHub Pages
 - [ ] (Después) Componente 2 — geovisor de proyectos desde MyMaps
 ```
