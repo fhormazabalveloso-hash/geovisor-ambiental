@@ -229,7 +229,11 @@ sigue saliendo de QGIS**; el visor acelera el paso previo (análisis + datos).
 - [x] Inicializar proyecto: estructura de carpetas + `git init` + `.gitignore`
 - [x] Primer commit con este README
 - [x] Decidir arquitectura definitiva → **MapLibre GL JS + PMTiles** (ver §2 y §3)
-- [ ] Montar pipeline de conversión del catálogo nacional a formato web
+- [x] Montar pipeline de conversión del catálogo nacional a formato web
+      (`pipeline/build_tiles.py` + `config.yaml`) — 13 de 18 capas generadas
+      en `data-web/*.pmtiles`; quedan pendientes las 5 capas grandes
+      (inundabilidad T10/T100/T500, DPH cartográfico probable, montes de
+      utilidad pública), en tanda aparte por su tamaño de origen (1-1.9 GB)
 - [ ] Migrar el visor actual (v4 Andalucía) a la estructura nueva
 - [ ] Construir cajetín Quadrante (logo + flecha norte + escala fija + retícula UTM)
 - [ ] Desarrollar análisis **cuantitativo** de afecciones (m, ha, PK)
