@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Geovisor Ambiental — Quadrante</title>
+  <title>Geovisor Ambiental - Quadrante</title>
 
   <link href="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.css" rel="stylesheet" />
   <link href="css/style.css" rel="stylesheet" />
@@ -21,19 +21,72 @@
         <div id="layer-panel"></div>
       </div>
 
-      <div id="basemap-switcher">
-        <label><input type="radio" name="basemap" value="pnoa" checked> PNOA (ortofoto)</label>
-        <label><input type="radio" name="basemap" value="osm"> OpenStreetMap</label>
+      <div id="top-right-controls">
+        <div id="basemap-switcher">
+          <label><input type="radio" name="basemap" value="pnoa" checked> PNOA (ortofoto)</label>
+          <label><input type="radio" name="basemap" value="osm"> OpenStreetMap</label>
+        </div>
+
+        <button id="export-open-btn" title="Exportar cartografía">🖨️ Exportar cartografía</button>
+
+        <button id="upload-open-btn" title="Subir tramo o punto de la actuación">📤 Subir tramo/punto</button>
+        <input type="file" id="upload-file-input" accept=".geojson,.json,.zip,.kml,.kmz" hidden>
+
+        <div id="upload-status" hidden></div>
       </div>
 
       <img id="north-arrow" src="assets/NORTE.svg" alt="Norte" />
     </div>
 
+    <div id="export-modal-backdrop" hidden>
+      <div id="export-modal">
+        <h2>Exportar cartografía</h2>
+
+        <label class="modal-field">
+          Orientación
+          <div class="modal-radio-row">
+            <label><input type="radio" name="export-orientation" value="horizontal" checked> A3 horizontal</label>
+            <label><input type="radio" name="export-orientation" value="vertical"> A3 vertical</label>
+          </div>
+        </label>
+
+        <label class="modal-field">
+          Título del mapa
+          <input type="text" id="export-title" value="Geovisor Ambiental - Análisis de afecciones">
+        </label>
+
+        <label class="modal-field">
+          Descripción / subtítulo
+          <input type="text" id="export-subtitle" value="">
+        </label>
+
+        <p class="modal-note">Se exporta la vista actual del mapa (encuadre, capas visibles y transparencias). Ajusta el mapa antes de generar.</p>
+
+        <div class="modal-actions">
+          <button id="export-cancel-btn">Cancelar</button>
+          <button id="export-generate-btn" class="primary">Generar</button>
+        </div>
+
+        <div id="export-result" hidden>
+          <img id="export-preview" alt="Vista previa de la cartografía exportada">
+          <div class="modal-actions">
+            <button id="export-download-png">Descargar PNG</button>
+            <button id="export-download-pdf" class="primary">Descargar PDF</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="export-overlay" hidden>
+      <div class="spinner"></div>
+      <span>Generando cartografía…</span>
+    </div>
+
     <div id="cajetin">
       <div class="logo"><img src="assets/QDE_META_White.svg" alt="Quadrante" /></div>
       <div class="titulo">
-        <strong>Geovisor Ambiental — Análisis de afecciones</strong>
-        <span>Prototipo de trabajo — no sustituye a la cartografía QGIS final</span>
+        <strong>Geovisor Ambiental - Análisis de afecciones</strong>
+        <span>Prototipo de trabajo - no sustituye a la cartografía QGIS final</span>
       </div>
       <div class="fuente">
         Elaboración propia a partir de MITECO / IGN · ETRS89 / EPSG:4326 (visor) · EPSG:25830 (QGIS)
@@ -43,7 +96,13 @@
 
   <script src="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.js"></script>
   <script src="https://unpkg.com/pmtiles@3/dist/pmtiles.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2/dist/jspdf.umd.min.js"></script>
+  <script src="https://unpkg.com/shpjs@4/dist/shp.min.js"></script>
+  <script src="https://unpkg.com/togeojson@0.16.0/togeojson.js"></script>
+  <script src="https://unpkg.com/jszip@3/dist/jszip.min.js"></script>
   <script src="js/layers.js"></script>
   <script src="js/main.js"></script>
+  <script src="js/export.js"></script>
+  <script src="js/upload.js"></script>
 </body>
 </html>

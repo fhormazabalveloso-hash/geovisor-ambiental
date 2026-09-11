@@ -90,11 +90,63 @@ html, body {
 }
 
 .layer-row {
+  padding: 4px 0;
+}
+
+.layer-row-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.layer-row label {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 3px 0;
   cursor: pointer;
+  min-width: 0;
+}
+
+.layer-row label .layer-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.layer-order-btns {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.layer-order-btn {
+  width: 18px;
+  height: 18px;
+  line-height: 1;
+  font-size: 9px;
+  padding: 0;
+  border: 1px solid var(--panel-border);
+  border-radius: 3px;
+  background: #fff;
+  cursor: pointer;
+  color: #555;
+}
+
+.layer-order-btn:hover:not(:disabled) {
+  background: #eef1f5;
+}
+
+.layer-order-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.layer-row .layer-opacity {
+  width: calc(100% - 20px);
+  margin: 2px 0 0 20px;
+  accent-color: var(--quadrante-blue);
+  height: 14px;
 }
 
 .swatch {
@@ -105,12 +157,21 @@ html, body {
   flex-shrink: 0;
 }
 
-/* --- Selector de mapa base --- */
-#basemap-switcher {
+/* --- Columna de controles arriba a la derecha ---
+   Todo apilado con flexbox (en vez de "top" fijo adivinado por elemento)
+   para que nunca se solapen, sea cual sea la altura real de cada uno. */
+#top-right-controls {
   position: absolute;
-  top: 12px;
+  top: 56px; /* deja sitio a los controles de zoom (NavigationControl) */
   right: 56px;
   z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+#basemap-switcher {
   background: var(--panel-bg);
   border: 1px solid var(--panel-border);
   border-radius: 6px;
@@ -131,8 +192,8 @@ html, body {
   bottom: 90px;
   right: 12px;
   z-index: 5;
-  width: 34px;
-  height: 34px;
+  width: 26px;   /* proporcion real del SVG: 226.69 x 425.24 (~1:1.88) */
+  height: 49px;
   opacity: 0.9;
   pointer-events: none;
 }
@@ -174,6 +235,194 @@ html, body {
   text-align: right;
   opacity: 0.85;
   max-width: 320px;
+}
+
+/* --- Boton exportar --- */
+#export-open-btn {
+  background: var(--quadrante-blue);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 12.5px;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+  white-space: nowrap;
+}
+
+#export-open-btn:hover {
+  filter: brightness(1.1);
+}
+
+#upload-open-btn {
+  background: #2E7D32;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 12.5px;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+  white-space: nowrap;
+}
+
+#upload-open-btn:hover {
+  filter: brightness(1.1);
+}
+
+#upload-status {
+  background: #fff;
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 12px;
+  max-width: 260px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+}
+
+#upload-status.error {
+  background: #fdecea;
+  color: #922B21;
+  border-color: #e6b3ad;
+}
+
+#upload-status.ok {
+  background: #eafaf1;
+  color: #1b5e20;
+  border-color: #a8dab5;
+}
+
+/* --- Modal de exportacion --- */
+#export-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#export-modal-backdrop[hidden] {
+  display: none;
+}
+
+#export-modal {
+  background: #fff;
+  border-radius: 8px;
+  padding: 20px 24px;
+  width: 420px;
+  max-width: 92vw;
+  max-height: 88vh;
+  overflow-y: auto;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+#export-modal h2 {
+  margin: 0 0 14px;
+  font-size: 16px;
+  color: var(--quadrante-blue);
+}
+
+.modal-field {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #444;
+  margin-bottom: 12px;
+}
+
+.modal-field input[type="text"] {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 6px 8px;
+  font-size: 13px;
+  font-weight: 400;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  box-sizing: border-box;
+}
+
+.modal-radio-row {
+  display: flex;
+  gap: 14px;
+  margin-top: 4px;
+  font-weight: 400;
+}
+
+.modal-note {
+  font-size: 11.5px;
+  color: #777;
+  margin: 4px 0 16px;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.modal-actions button {
+  padding: 7px 14px;
+  border-radius: 5px;
+  border: 1px solid var(--panel-border);
+  background: #fff;
+  cursor: pointer;
+  font-size: 12.5px;
+}
+
+.modal-actions button.primary {
+  background: var(--quadrante-blue);
+  color: #fff;
+  border-color: var(--quadrante-blue);
+}
+
+#export-result {
+  margin-top: 16px;
+  border-top: 1px solid var(--panel-border);
+  padding-top: 14px;
+}
+
+#export-preview {
+  width: 100%;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  display: block;
+  margin-bottom: 10px;
+}
+
+/* --- Overlay "generando" --- */
+#export-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  background: rgba(24, 44, 84, 0.85);
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  font-size: 14px;
+}
+
+#export-overlay[hidden] {
+  display: none;
+}
+
+.spinner {
+  width: 40px;
+  height: 40px;
+  border: 4px solid rgba(255, 255, 255, 0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 /* --- MapLibre overrides menores --- */

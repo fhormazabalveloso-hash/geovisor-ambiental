@@ -15,10 +15,10 @@ Por cada capa de `config.yaml`:
 1. **Reproyección** a EPSG:4326 con `ogr2ogr` (una sola fuente) o fusión de
    varias fuentes con `geopandas` + reproyección (cuando la capa está
    partida en varios ficheros, p. ej. peninsula/Canarias o por provincia).
-2. **Teselado**: `ogr2ogr -f MVT` — el driver MVT de GDAL genera el árbol de
+2. **Teselado**: `ogr2ogr -f MVT` - el driver MVT de GDAL genera el árbol de
    teselas (`z/x/y.pbf`) directamente, sin tippecanoe.
 3. **Empaquetado**: `pmtiles.convert.disk_to_pmtiles()` empaqueta el árbol
-   en un único `.pmtiles` — formato de un archivo, servible por HTTP range
+   en un único `.pmtiles` - formato de un archivo, servible por HTTP range
    requests desde GitHub Pages (sin servidor de teselas).
 
 ## Requisitos
@@ -41,16 +41,16 @@ python pipeline\build_tiles.py                      # construye TODO el catálog
 ```
 
 La salida va a `data-web/<id>.pmtiles`. Si un `.pmtiles` supera ~90 MB, el
-script avisa: Git/GitHub tienen límite duro de 100 MB por archivo — hay que
+script avisa: Git/GitHub tienen límite duro de 100 MB por archivo - hay que
 subir `maxzoom` hacia abajo, simplificar geometría, o (si no queda otra)
 usar Git LFS / GitHub Releases para ese archivo en vez de commitearlo
 directo. Esto es más probable en las capas grandes (ver siguiente sección).
 
-## Capas grandes — aparte
+## Capas grandes - aparte
 
 Cinco capas parten de shapefiles de 1-1.9 GB (inundabilidad T10/T100/T500,
 DPH cartográfico probable, montes de utilidad pública). El teselado a
-resoluciones altas (`z > 9`) es lento — `pmtiles` incluso avisa
+resoluciones altas (`z > 9`) es lento - `pmtiles` incluso avisa
 `"Large tilesets (z > 9) require extreme processing times"`. Se han
 configurado con `maxzoom` reducido (12-13) precisamente por esto, pero aun
 así conviene construirlas aparte / sin prisa, no en la tanda rápida:
@@ -68,5 +68,5 @@ python pipeline\build_tiles.py --only dph_cartografico_probable,laminas_inundaci
 - La capa `vegetacion_so` (Vegetación 10 SE/SO) se dejó fuera: no está en
   el catálogo del README y solo cubre 2 hojas regionales, no toda España.
 - El pipeline lee directamente de la carpeta de Cristian en OneDrive
-  (`data_raw_root` en `config.yaml`) — no se copian los datos en bruto
+  (`data_raw_root` en `config.yaml`) - no se copian los datos en bruto
   dentro del repo, para no duplicar los ~8 GB del catálogo.

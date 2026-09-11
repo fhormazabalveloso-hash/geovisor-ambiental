@@ -1,4 +1,4 @@
-# Catálogo de capas del Geovisor Ambiental — configuración del pipeline de datos.
+# Catálogo de capas del Geovisor Ambiental - configuración del pipeline de datos.
 #
 # `data_raw_root` apunta a la carpeta de descargas ya organizada por Cristian
 # (fuera del repo, no se copia dentro de data-raw/ para no duplicar ~8 GB).
@@ -7,9 +7,9 @@
 # pipeline las fusiona y reproyecta a EPSG:4326 antes de tesela.
 #
 # nivel: 1 (afección jurídica plena) / 2 (estimada, con matiz) / 3 (contexto)
-#   — ver README.md §5.
+#   - ver README.md §5.
 #
-# TODO Francisco: revisar sobre todo las capas marcadas "# revisar:" — son
+# TODO Francisco: revisar sobre todo las capas marcadas "# revisar:" - son
 # ficheros presentes en la carpeta origen cuyo significado exacto (qué
 # distingue *_c / *_p / *_pb, o los prefijos A_/Ca_/M_) he inferido por el
 # nombre, no por metadato confirmado.
@@ -19,7 +19,7 @@ output_dir: "..\\data-web"
 
 layers:
   # ---------------------------------------------------------------------
-  # NIVEL 1 — afección jurídica plena (cruce automático obligatorio)
+  # NIVEL 1 - afección jurídica plena (cruce automático obligatorio)
   # ---------------------------------------------------------------------
   - id: red_natura_2000
     nombre: "Red Natura 2000 (ZEC + ZEPA)"
@@ -36,7 +36,7 @@ layers:
     tematica: espacios_protegidos
     nivel: 1
     # revisar: Enp2025_c.json (16.9 MB, probablemente centroides/puntos) y
-    # Enp2025_p.json (189.9 MB, poligonos) — se tesela solo el poligono;
+    # Enp2025_p.json (189.9 MB, poligonos) - se tesela solo el poligono;
     # el fichero de centroides no aporta geometria de afeccion.
     fuente:
       - "04_espacios_protegidos\\Enp2025_geojson\\Enp2025_p.json"
@@ -57,7 +57,7 @@ layers:
     tematica: patrimonio_natural
     nivel: 1
     # revisar: IEPF_CMUP_c.geojson (7.7 MB, centroides) vs IEPF_CMUP_pb.geojson
-    # (1.19 GB, poligono base) — se tesela el poligono. Fichero grande: primer
+    # (1.19 GB, poligono base) - se tesela el poligono. Fichero grande: primer
     # candidato a simplificacion agresiva si el .pmtiles resultante pesa
     # demasiado para Git (ver pipeline/README.md).
     fuente:
@@ -84,13 +84,13 @@ layers:
     maxzoom: 14
 
   # ---------------------------------------------------------------------
-  # NIVEL 2 — afección estimada / con matiz (cruce con etiqueta metodológica)
+  # NIVEL 2 - afección estimada / con matiz (cruce con etiqueta metodológica)
   # ---------------------------------------------------------------------
   - id: dph_cartografico_probable
     nombre: "DPH cartográfico probable (Proyecto LINDE)"
     tematica: hidrografia
     nivel: 2
-    # Fichero de 1.15 GB — candidato a simplificacion / maxzoom reducido.
+    # Fichero de 1.15 GB - candidato a simplificacion / maxzoom reducido.
     fuente:
       - "02_hidrografia\\dph-cartografico-probable\\DHP_PenBalCan_20260421.shp"
     minzoom: 0
@@ -128,7 +128,7 @@ layers:
     tematica: hidrografia
     nivel: 2
     # revisar: prefijos A_ / Ca_ / M_ (probablemente vertiente
-    # Atlantica/Canarias/Mediterranea) — se fusionan en una sola capa.
+    # Atlantica/Canarias/Mediterranea) - se fusionan en una sola capa.
     fuente:
       - "02_hidrografia\\RiosCompPfafs\\A_RiosCompletosv2.shp"
       - "02_hidrografia\\RiosCompPfafs\\Ca_RiosCompletosv2.shp"
@@ -149,7 +149,7 @@ layers:
     nombre: "Humedales y turberas (complementario a IEZH)"
     tematica: hidrografia
     nivel: 2
-    # revisar: capa no listada explicitamente en README §5 — confirmar con
+    # revisar: capa no listada explicitamente en README §5 - confirmar con
     # Cristian si complementa o sustituye a IEZH, y si tiene validez propia
     # o es solo inventario cientifico (en cuyo caso seria Nivel 3).
     fuente:
@@ -158,10 +158,10 @@ layers:
     maxzoom: 14
 
   # ---------------------------------------------------------------------
-  # NIVEL 3 — contexto e información complementaria (activable)
+  # NIVEL 3 - contexto e información complementaria (activable)
   # ---------------------------------------------------------------------
   - id: iba
-    nombre: "IBA — Áreas Importantes para las Aves"
+    nombre: "IBA - Áreas Importantes para las Aves"
     tematica: contexto
     nivel: 3
     fuente:
@@ -218,5 +218,5 @@ layers:
 
   # revisar: vegetacion_so (Vegetacion_10_SE.shp, Vegetacion_10_SO.shp) no
   # esta en el catalogo del README y solo cubre 2 hojas regionales (no es
-  # cobertura nacional) — se deja fuera del pipeline hasta confirmar alcance
+  # cobertura nacional) - se deja fuera del pipeline hasta confirmar alcance
   # y si hace falta el resto de hojas.

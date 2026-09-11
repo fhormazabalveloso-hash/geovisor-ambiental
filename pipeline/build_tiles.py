@@ -87,7 +87,7 @@ def ensure_gdal_readable(p: Path, layer_tmp: Path) -> Path:
     s = str(p)
     if len(s) < 240:
         return p
-    print(f"  ruta de origen larga ({len(s)} caracteres) — copiando a ruta corta para GDAL...")
+    print(f"  ruta de origen larga ({len(s)} caracteres) - copiando a ruta corta para GDAL...")
     lp = long_path(p)
     dest_dir = layer_tmp / "_src"
     dest_dir.mkdir(parents=True, exist_ok=True)
@@ -131,7 +131,7 @@ def reproject_and_merge(sources: list[Path], dst_gpkg: Path):
 
 def build_layer(layer: dict, data_raw_root: Path, output_dir: Path, tmp_dir: Path):
     layer_id = layer["id"]
-    print(f"\n=== {layer_id} — {layer['nombre']} ===")
+    print(f"\n=== {layer_id} - {layer['nombre']} ===")
     t0 = time.time()
 
     layer_tmp = tmp_dir / layer_id
@@ -160,7 +160,7 @@ def build_layer(layer: dict, data_raw_root: Path, output_dir: Path, tmp_dir: Pat
          "-dsco", f"DESCRIPTION={layer['nombre']}"])
 
     n_tiles = sum(1 for _ in tiles_dir.rglob("*.pbf"))
-    print(f"  teselado: {n_tiles} archivos .pbf — empaquetando a pmtiles...")
+    print(f"  teselado: {n_tiles} archivos .pbf - empaquetando a pmtiles...")
 
     from pmtiles.convert import disk_to_pmtiles
 
@@ -172,7 +172,7 @@ def build_layer(layer: dict, data_raw_root: Path, output_dir: Path, tmp_dir: Pat
     elapsed = time.time() - t0
     print(f"  -> {out_path.name}: {size_mb:.1f} MB en {elapsed:.0f}s")
     if size_mb > 90:
-        print(f"  !! AVISO: {out_path.name} supera ~90 MB — revisar limite de "
+        print(f"  !! AVISO: {out_path.name} supera ~90 MB - revisar limite de "
               f"tamano de archivo de Git/GitHub antes de hacer commit.")
 
     # La limpieza va DESPUES de registrar el resultado: si falla (p. ej. un
@@ -225,7 +225,7 @@ def main():
 
     # Cada capa corre en su propio subproceso: si una capa agota la memoria
     # o el proceso muere, Windows libera toda esa memoria de golpe al
-    # terminar el subproceso, y las capas siguientes arrancan limpias —
+    # terminar el subproceso, y las capas siguientes arrancan limpias -
     # en vez de acumular memoria en un unico proceso Python de larga
     # duracion (lo que causo que el sistema matara el lote entero por falta
     # de memoria en un intento anterior).

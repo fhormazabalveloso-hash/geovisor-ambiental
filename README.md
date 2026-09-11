@@ -1,4 +1,4 @@
-# Geovisor Ambiental — Especificación del proyecto
+# Geovisor Ambiental - Especificación del proyecto
 
 > Documento de arranque y memoria viva del proyecto.
 > Léelo al inicio de cada sesión para no perder el contexto.
@@ -121,7 +121,7 @@ Organización recomendada: **agrupación por temática de cara al usuario**, con
 el **nivel jurídico como propiedad (metadato) de cada capa**. El análisis de
 afecciones usa el nivel jurídico para decidir el comportamiento.
 
-### Nivel 1 — Afección jurídica plena (cruce automático obligatorio)
+### Nivel 1 - Afección jurídica plena (cruce automático obligatorio)
 
 | Capa | Fuente | Notas |
 |---|---|---|
@@ -132,20 +132,20 @@ afecciones usa el nivel jurídico para decidir el comportamiento.
 | DPH deslindado | CHG / confederaciones | **validez jurídica plena** |
 | Inventario Español de Zonas Húmedas (IEZH) | MITECO | |
 
-### Nivel 2 — Afección estimada / con matiz (cruce con etiqueta metodológica)
+### Nivel 2 - Afección estimada / con matiz (cruce con etiqueta metodológica)
 
 | Capa | Fuente | Notas |
 |---|---|---|
-| DPH cartográfico probable (Proyecto LINDE) | MITECO | estimado, **sin tramitación** — citar como probable |
+| DPH cartográfico probable (Proyecto LINDE) | MITECO | estimado, **sin tramitación** - citar como probable |
 | Láminas de inundación T10 / T100 / T500 | SNCZI · MITECO | por periodo de retorno |
 | Red hidrográfica (Pfafstetter - RiosCompPfafs) | MITECO | base para buffer zona de policía 100 m |
 | Hábitats de Interés Comunitario (HIC) | MITECO | **malla 10×10 = presencia, no delimitación** |
 
-### Nivel 3 — Contexto e información complementaria (activable, no cruce automático)
+### Nivel 3 - Contexto e información complementaria (activable, no cruce automático)
 
 | Capa | Fuente | Notas |
 |---|---|---|
-| IBA — Áreas Importantes para las Aves | SEO/BirdLife | criterio científico, **no figura legal** |
+| IBA - Áreas Importantes para las Aves | SEO/BirdLife | criterio científico, **no figura legal** |
 | Núcleos urbanos | CNIG | contexto |
 | Líneas límite municipales | CNIG | contexto |
 
@@ -230,7 +230,7 @@ sigue saliendo de QGIS**; el visor acelera el paso previo (análisis + datos).
 - [x] Primer commit con este README
 - [x] Decidir arquitectura definitiva → **MapLibre GL JS + PMTiles** (ver §2 y §3)
 - [x] Montar pipeline de conversión del catálogo nacional a formato web
-      (`pipeline/build_tiles.py` + `config.yaml`) — 13 de 18 capas generadas
+      (`pipeline/build_tiles.py` + `config.yaml`) - 13 de 18 capas generadas
       en `data-web/*.pmtiles`; quedan pendientes las 5 capas grandes
       (inundabilidad T10/T100/T500, DPH cartográfico probable, montes de
       utilidad pública), en tanda aparte por su tamaño de origen (1-1.9 GB)
@@ -239,7 +239,7 @@ sigue saliendo de QGIS**; el visor acelera el paso previo (análisis + datos).
       (logo + flecha norte + escala + fuente/CRS). Falta migrar el resto
       de comportamiento del visor v4 Andalucía (subida de tramo, buffer,
       análisis).
-- [x] Configurar despliegue en GitHub Pages —
+- [x] Configurar despliegue en GitHub Pages -
       https://fhormazabalveloso-hash.github.io/geovisor-ambiental/src/index.html
       (repo público, rama `main`). Peticiones de rango HTTP verificadas
       funcionando en el CDN real de GitHub Pages (Fastly), no solo en
@@ -247,5 +247,5 @@ sigue saliendo de QGIS**; el visor acelera el paso previo (análisis + datos).
 - [ ] Subida de tramo/punto (SHP/KML/GeoJSON) + buffer de afección
 - [ ] Desarrollar análisis **cuantitativo** de afecciones (m, ha, PK)
 - [ ] Exportación de tabla de afecciones a Excel/Word
-- [ ] (Después) Componente 2 — geovisor de proyectos desde MyMaps
+- [ ] (Después) Componente 2 - geovisor de proyectos desde MyMaps
 ```

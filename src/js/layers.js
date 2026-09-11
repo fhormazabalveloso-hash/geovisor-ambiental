@@ -6,12 +6,12 @@
 // nivel: 1 = afeccion juridica plena (cruce automatico obligatorio)
 //        2 = afeccion estimada / con matiz (etiqueta metodologica)
 //        3 = contexto (activable, no vinculante)
-
-const NIVEL_COLOR = {
-  1: { fill: "#C0392B", line: "#7B241C" }, // rojo -- afeccion plena
-  2: { fill: "#E08E1D", line: "#9C6110" }, // ambar -- estimada
-  3: { fill: "#5D7A99", line: "#3B4F63" }, // gris-azulado -- contexto
-};
+// color: propio de cada capa (no compartido por nivel) -- pensado para que
+//        la cartografia exportada distinga cada capa individualmente.
+// labelField: campo de atributo con el nombre del elemento concreto (p.ej.
+//        el nombre de un espacio Red Natura, un rio, una via pecuaria).
+//        null cuando la capa no trae un campo de nombre util -- verificado
+//        contra los campos reales de cada .pmtiles (pmtiles.reader).
 
 const LAYERS = [
   {
@@ -21,6 +21,8 @@ const LAYERS = [
     nivel: 1,
     sourceLayer: "reproj",
     geom: "polygon",
+    color: { fill: "#2E7D32", line: "#1B5E20" }, // verde oscuro
+    labelField: "SITE_NAME",
     visibleByDefault: true,
   },
   {
@@ -30,6 +32,8 @@ const LAYERS = [
     nivel: 1,
     sourceLayer: "Enp2025_p",
     geom: "polygon",
+    color: { fill: "#66BB6A", line: "#2E7D32" }, // verde medio
+    labelField: "SITE_NAME",
     visibleByDefault: true,
   },
   {
@@ -39,6 +43,8 @@ const LAYERS = [
     nivel: 1,
     sourceLayer: "RGVP_BDN_2024",
     geom: "line",
+    color: { fill: "#A1662F", line: "#6D4520" }, // marron
+    labelField: "nb_via",
     visibleByDefault: true,
   },
   {
@@ -48,6 +54,8 @@ const LAYERS = [
     nivel: 1,
     sourceLayer: "DPH_DESLINDADO_20250319",
     geom: "polygon",
+    color: { fill: "#1565C0", line: "#0D47A1" }, // azul fuerte
+    labelField: "RIO",
     visibleByDefault: true,
   },
   {
@@ -57,6 +65,8 @@ const LAYERS = [
     nivel: 1,
     sourceLayer: "IEZH_P_2025",
     geom: "polygon",
+    color: { fill: "#26A69A", line: "#00695C" }, // verde azulado
+    labelField: "IEZH_NAME",
     visibleByDefault: true,
   },
   {
@@ -66,6 +76,8 @@ const LAYERS = [
     nivel: 2,
     sourceLayer: "reproj",
     geom: "line",
+    color: { fill: "#42A5F5", line: "#1976D2" }, // azul claro
+    labelField: "nom_rio",
     visibleByDefault: true,
   },
   {
@@ -75,6 +87,8 @@ const LAYERS = [
     nivel: 2,
     sourceLayer: "ESArt17_HabitDistrib",
     geom: "polygon",
+    color: { fill: "#8E24AA", line: "#4A148C" }, // morado
+    labelField: null, // malla de codigos de habitat, sin nombre propio
     visibleByDefault: false, // malla 10x10 = presencia, no delimitacion (README §5)
   },
   {
@@ -84,15 +98,19 @@ const LAYERS = [
     nivel: 2,
     sourceLayer: "Humedal_TurberaBCAM2_2025",
     geom: "polygon",
+    color: { fill: "#00838F", line: "#004D50" }, // cian oscuro
+    labelField: null, // el fichero de origen no trae campo de nombre
     visibleByDefault: true,
   },
   {
     id: "iba",
-    nombre: "IBA — Áreas Importantes para las Aves",
+    nombre: "IBA - Áreas Importantes para las Aves",
     tematica: "contexto",
     nivel: 3,
     sourceLayer: "IBA España",
     geom: "polygon",
+    color: { fill: "#F9A825", line: "#B45F06" }, // ambar
+    labelField: "NatName",
     visibleByDefault: false,
   },
   {
@@ -102,6 +120,8 @@ const LAYERS = [
     nivel: 3,
     sourceLayer: "reproj",
     geom: "polygon",
+    color: { fill: "#757575", line: "#424242" }, // gris
+    labelField: null, // el nombre vive en otra sub-tabla del GPKG de origen
     visibleByDefault: false,
   },
   {
@@ -111,6 +131,8 @@ const LAYERS = [
     nivel: 3,
     sourceLayer: "reproj",
     geom: "line",
+    color: { fill: "#BDBDBD", line: "#9E9E9E" }, // gris claro
+    labelField: null, // son lineas de limite, no poligonos de unidad -- etiquetar el borde no aporta
     visibleByDefault: false,
   },
   {
@@ -120,6 +142,8 @@ const LAYERS = [
     nivel: 3,
     sourceLayer: "reproj",
     geom: "line",
+    color: { fill: "#9E9E9E", line: "#757575" }, // gris medio
+    labelField: null,
     visibleByDefault: true,
   },
   {
@@ -129,12 +153,14 @@ const LAYERS = [
     nivel: 3,
     sourceLayer: "reproj",
     geom: "line",
+    color: { fill: "#616161", line: "#424242" }, // gris oscuro
+    labelField: null,
     visibleByDefault: true,
   },
 ];
 
 const NIVEL_LABEL = {
-  1: "Nivel 1 — Afección plena",
-  2: "Nivel 2 — Afección estimada",
-  3: "Nivel 3 — Contexto",
+  1: "Nivel 1 - Afección plena",
+  2: "Nivel 2 - Afección estimada",
+  3: "Nivel 3 - Contexto",
 };
