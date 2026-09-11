@@ -244,8 +244,21 @@ sigue saliendo de QGIS**; el visor acelera el paso previo (análisis + datos).
       (repo público, rama `main`). Peticiones de rango HTTP verificadas
       funcionando en el CDN real de GitHub Pages (Fastly), no solo en
       local.
-- [ ] Subida de tramo/punto (SHP/KML/GeoJSON) + buffer de afección
-- [ ] Desarrollar análisis **cuantitativo** de afecciones (m, ha, PK)
+- [x] Colores propios por capa (no por nivel), etiquetas de nombre por
+      elemento en las 7 capas que traen ese dato, control de transparencia
+      y orden de dibujo manual por capa (ver `src/js/layers.js`)
+- [x] Exportación de cartografía a A3 (PNG/PDF) con leyenda, flecha norte,
+      escala gráfica y cajetín Quadrante (`src/js/export.js`) - lista para
+      pegar en memoria/condicionantes ambientales de una licitación
+- [x] Subida de tramo/punto: GeoJSON, SHP (.zip) y KML/KMZ
+      (`src/js/upload.js`). GPKG pendiente (necesita SQLite-WASM, más
+      pesado - se añade si hace falta)
+- [ ] Buffer de afección (25/50/100/200/500 m; 100 m fijo para zona de
+      policía DPH) sobre el tramo subido
+- [ ] Cruce automático cuantitativo con las capas (m, ha, PK) - el
+      corazón del proyecto, aún no empezado
 - [ ] Exportación de tabla de afecciones a Excel/Word
+- [ ] Generar las 5 capas grandes pendientes (inundabilidad T10/T100/T500,
+      DPH cartográfico probable, montes de utilidad pública)
 - [ ] (Después) Componente 2 - geovisor de proyectos desde MyMaps
 ```
