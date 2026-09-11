@@ -7,6 +7,10 @@ data-raw/
 *.tiff
 *.gdb/
 
+# Carpeta de trabajo del pipeline (por si alguna vez se crea aqui dentro;
+# normalmente vive fuera de OneDrive, ver pipeline/build_tiles.py)
+pipeline/_tmp/
+
 # Sistema / editor
 .DS_Store
 Thumbs.db

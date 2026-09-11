@@ -50,7 +50,7 @@ layers:
     fuente:
       - "05_patrimonio_natural\\RGVP_Geojson\\RGVP_BDN_2024.geojson"
     minzoom: 0
-    maxzoom: 15
+    maxzoom: 12  # bajado de 15: pmtiles pesaba 149.1 MB, por encima del limite de Git
 
   - id: montes_utilidad_publica
     nombre: "Montes de Utilidad Pública (CMUP/IEPF)"
@@ -134,7 +134,7 @@ layers:
       - "02_hidrografia\\RiosCompPfafs\\Ca_RiosCompletosv2.shp"
       - "02_hidrografia\\RiosCompPfafs\\M_RiosCompletosv2.shp"
     minzoom: 0
-    maxzoom: 13
+    maxzoom: 10  # bajado de 13: pmtiles pesaba 258.4 MB, muy por encima del limite de Git
 
   - id: hic
     nombre: "Hábitats de Interés Comunitario (HIC)"
@@ -184,7 +184,7 @@ layers:
       - "01_base_territorial\\Nucleos urbanos\\IGRPO_v2024_41_ETRS89_20251016.gpkg"
       - "01_base_territorial\\Nucleos urbanos\\IGRPO_v2024_45_ETRS89_20251016.gpkg"
     minzoom: 6
-    maxzoom: 14
+    maxzoom: 12  # bajado de 14: pmtiles pesaba 142.2 MB, por encima del limite de Git
 
   - id: limites_municipales
     nombre: "Líneas límite municipales"
@@ -194,7 +194,7 @@ layers:
       - "01_base_territorial\\lineas_limite\\SHP_ETRS89\\ll_municipales\\ll_municipales_inspire_peninbal_etrs89.shp"
       - "01_base_territorial\\lineas_limite\\SHP_REGCAN95\\ll_municipales\\ll_municipales_inspire_canarias_regcan95.shp"
     minzoom: 4
-    maxzoom: 14
+    maxzoom: 12  # bajado de 14: pmtiles pesaba 105.6 MB, por encima del limite de Git
 
   - id: limites_provinciales
     nombre: "Líneas límite provinciales"
