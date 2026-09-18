@@ -13,12 +13,24 @@
     <div id="map-container">
       <div id="map"></div>
 
-      <div id="layer-panel-container">
-        <div id="panel-header">
-          <span>Capas ambientales</span>
-          <button id="panel-toggle" title="Mostrar/ocultar">▾</button>
+      <div id="left-panels-container">
+        <div id="layer-panel-container">
+          <div id="panel-header">
+            <span>Capas ambientales</span>
+            <button id="panel-toggle" title="Mostrar/ocultar">▾</button>
+          </div>
+          <div id="layer-panel"></div>
         </div>
-        <div id="layer-panel"></div>
+
+        <div id="upload-panel-container">
+          <div id="upload-panel-header">
+            <span>Tramos y puntos subidos</span>
+            <button id="upload-panel-toggle" title="Mostrar/ocultar">▾</button>
+          </div>
+          <div id="upload-panel">
+            <p id="upload-panel-empty">Sin tramos subidos todavía.</p>
+          </div>
+        </div>
       </div>
 
       <div id="top-right-controls">
@@ -30,7 +42,7 @@
         <button id="export-open-btn" title="Exportar cartografía">🖨️ Exportar cartografía</button>
 
         <button id="upload-open-btn" title="Subir tramo o punto de la actuación">📤 Subir tramo/punto</button>
-        <input type="file" id="upload-file-input" accept=".geojson,.json,.zip,.kml,.kmz" hidden>
+        <input type="file" id="upload-file-input" accept=".geojson,.json,.zip,.kml,.kmz" multiple hidden>
 
         <div id="upload-status" hidden></div>
       </div>
@@ -52,7 +64,7 @@
 
         <label class="modal-field">
           Título del mapa
-          <input type="text" id="export-title" value="Geovisor Ambiental - Análisis de afecciones">
+          <input type="text" id="export-title" value="Geovisor Ambiental">
         </label>
 
         <label class="modal-field">
@@ -60,7 +72,22 @@
           <input type="text" id="export-subtitle" value="">
         </label>
 
-        <p class="modal-note">Se exporta la vista actual del mapa (encuadre, capas visibles y transparencias). Ajusta el mapa antes de generar.</p>
+        <label class="modal-field">
+          Escala
+          <select id="export-scale">
+            <option value="500">1:500</option>
+            <option value="1000">1:1.000</option>
+            <option value="2000">1:2.000</option>
+            <option value="2500">1:2.500</option>
+            <option value="5000">1:5.000</option>
+            <option value="10000">1:10.000</option>
+            <option value="25000">1:25.000</option>
+            <option value="50000">1:50.000</option>
+            <option value="100000">1:100.000</option>
+          </select>
+        </label>
+
+        <p class="modal-note">La escala se calcula por defecto a partir de tu vista actual (redondeada a la más cercana de la lista) — puedes cambiarla antes de generar. El centro del mapa será el mismo que tienes ahora.</p>
 
         <div class="modal-actions">
           <button id="export-cancel-btn">Cancelar</button>
@@ -82,10 +109,27 @@
       <span>Generando cartografía…</span>
     </div>
 
+    <div id="analysis-overlay" hidden>
+      <div class="spinner"></div>
+      <span>Analizando afecciones…</span>
+    </div>
+
+    <div id="analysis-modal-backdrop" hidden>
+      <div id="analysis-modal">
+        <h2>Análisis de afecciones</h2>
+        <p id="analysis-subtitle" class="modal-note"></p>
+        <div id="analysis-results"></div>
+        <div class="modal-actions">
+          <button id="analysis-close-btn">Cerrar</button>
+          <button id="analysis-download-csv" class="primary">Descargar CSV</button>
+        </div>
+      </div>
+    </div>
+
     <div id="cajetin">
       <div class="logo"><img src="assets/QDE_META_White.svg" alt="Quadrante" /></div>
       <div class="titulo">
-        <strong>Geovisor Ambiental - Análisis de afecciones</strong>
+        <strong>Geovisor Ambiental</strong>
         <span>Prototipo de trabajo - no sustituye a la cartografía QGIS final</span>
       </div>
       <div class="fuente">
@@ -100,9 +144,11 @@
   <script src="https://unpkg.com/shpjs@4/dist/shp.min.js"></script>
   <script src="https://unpkg.com/togeojson@0.16.0/togeojson.js"></script>
   <script src="https://unpkg.com/jszip@3/dist/jszip.min.js"></script>
+  <script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
   <script src="js/layers.js"></script>
   <script src="js/main.js"></script>
   <script src="js/export.js"></script>
   <script src="js/upload.js"></script>
+  <script src="js/analysis.js"></script>
 </body>
 </html>

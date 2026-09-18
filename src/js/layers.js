@@ -23,7 +23,7 @@ const LAYERS = [
     geom: "polygon",
     color: { fill: "#2E7D32", line: "#1B5E20" }, // verde oscuro
     labelField: "SITE_NAME",
-    visibleByDefault: true,
+    visibleByDefault: false,
   },
   {
     id: "enp",
@@ -34,7 +34,7 @@ const LAYERS = [
     geom: "polygon",
     color: { fill: "#66BB6A", line: "#2E7D32" }, // verde medio
     labelField: "SITE_NAME",
-    visibleByDefault: true,
+    visibleByDefault: false,
   },
   {
     id: "vias_pecuarias",
@@ -45,7 +45,8 @@ const LAYERS = [
     geom: "line",
     color: { fill: "#A1662F", line: "#6D4520" }, // marron
     labelField: "nb_via",
-    visibleByDefault: true,
+    sortField: "nm_long", // prioriza tramos mas largos cuando compiten por espacio la etiqueta
+    visibleByDefault: false,
   },
   {
     id: "dph_deslindado",
@@ -56,7 +57,7 @@ const LAYERS = [
     geom: "polygon",
     color: { fill: "#1565C0", line: "#0D47A1" }, // azul fuerte
     labelField: "RIO",
-    visibleByDefault: true,
+    visibleByDefault: false,
   },
   {
     id: "iezh",
@@ -67,7 +68,7 @@ const LAYERS = [
     geom: "polygon",
     color: { fill: "#26A69A", line: "#00695C" }, // verde azulado
     labelField: "IEZH_NAME",
-    visibleByDefault: true,
+    visibleByDefault: false,
   },
   {
     id: "red_hidrografica",
@@ -78,7 +79,8 @@ const LAYERS = [
     geom: "line",
     color: { fill: "#42A5F5", line: "#1976D2" }, // azul claro
     labelField: "nom_rio",
-    visibleByDefault: true,
+    sortField: "Shape_Leng", // prioriza tramos mas largos: red muy densa, mucha competencia por hueco
+    visibleByDefault: false,
   },
   {
     id: "hic",
@@ -90,6 +92,15 @@ const LAYERS = [
     color: { fill: "#8E24AA", line: "#4A148C" }, // morado
     labelField: null, // malla de codigos de habitat, sin nombre propio
     visibleByDefault: false, // malla 10x10 = presencia, no delimitacion (README §5)
+    // El fichero de origen trae un poligono repetido por cada codigo de
+    // habitat presente en una misma celda 10x10 km (una celda con 40
+    // codigos = 40 poligonos identicos). Sumar area de interseccion por
+    // feature infla la superficie muchas veces (verificado con un caso de
+    // prueba: 1.573 ha de "afeccion" en un buffer de 83 ha). analysis.js
+    // usa este flag para no calcular superficie de esta capa y listar en
+    // su lugar los codigos de habitat presentes (campo "Code").
+    presenceOnly: true,
+    analysisNameField: "Code",
   },
   {
     id: "humedales_turberas",
@@ -100,7 +111,7 @@ const LAYERS = [
     geom: "polygon",
     color: { fill: "#00838F", line: "#004D50" }, // cian oscuro
     labelField: null, // el fichero de origen no trae campo de nombre
-    visibleByDefault: true,
+    visibleByDefault: false,
   },
   {
     id: "iba",
@@ -144,7 +155,7 @@ const LAYERS = [
     geom: "line",
     color: { fill: "#9E9E9E", line: "#757575" }, // gris medio
     labelField: null,
-    visibleByDefault: true,
+    visibleByDefault: false,
   },
   {
     id: "limites_autonomicos",
@@ -155,7 +166,7 @@ const LAYERS = [
     geom: "line",
     color: { fill: "#616161", line: "#424242" }, // gris oscuro
     labelField: null,
-    visibleByDefault: true,
+    visibleByDefault: false,
   },
 ];
 

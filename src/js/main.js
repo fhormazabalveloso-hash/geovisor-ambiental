@@ -39,6 +39,14 @@ for (const l of LAYERS) layerOpacity[l.id] = l.geom === "polygon" ? 0.35 : 1;
 const layerVisible = {};
 for (const l of LAYERS) layerVisible[l.id] = l.visibleByDefault;
 
+// Visibilidad de las ETIQUETAS de cada capa, independiente de si la capa
+// en si esta encendida -- se puede querer ver el relleno/linea de una
+// capa sin sus nombres (o al reves, aunque sin la capa visible el nombre
+// no tendria mucho sentido, así que se aplica siempre en combinacion con
+// layerVisible, nunca solo).
+const labelVisible = {};
+for (const l of LAYERS) labelVisible[l.id] = true;
+
 function buildStyle(basemapKey) {
   const basemap = BASEMAPS[basemapKey];
   const sources = {
@@ -100,13 +108,38 @@ function buildStyle(basemapKey) {
         type: "symbol",
         source: sourceId,
         "source-layer": l.sourceLayer,
-        minzoom: 9,
+        minzoom: 7,
+        // Cuando hay demasiadas etiquetas candidatas compitiendo por el
+        // mismo hueco (redes muy densas como la hidrografica), MapLibre
+        // oculta las que no caben -- symbol-sort-key decide cuales ganan
+        // esa pugna. Valor mas BAJO = mas prioridad, así que se usa el
+        // campo de longitud en negativo para que los tramos mas largos
+        // (mas relevantes) se muestren antes que los cortos.
+        ...(l.sortField ? { "symbol-sort-key": ["-", 0, ["to-number", ["get", l.sortField]]] } : {}),
         layout: {
-          visibility,
-          "text-field": ["get", l.labelField],
+          visibility: layerVisible[l.id] && labelVisible[l.id] ? "visible" : "none",
+          // Varias capas de origen usan un valor de relleno tipo "SIN
+          // NOMBRE" en vez de dejar el campo vacio cuando el elemento no
+          // tiene nombre propio (p. ej. ~49% de los tramos de la red
+          // hidrografica). Sin este filtro, esos tramos mostrarian el
+          // texto literal "SIN NOMBRE" en vez de no mostrar etiqueta.
+          "text-field": [
+            "case",
+            ["in", ["downcase", ["to-string", ["coalesce", ["get", l.labelField], ""]]],
+              ["literal", ["sin nombre", "s/n", "sin identificar", ""]]],
+            "",
+            ["get", l.labelField],
+          ],
           "text-font": ["Noto Sans Regular"],
           "text-size": 11,
-          "symbol-placement": l.geom === "line" ? "line" : "point",
+          // "point" en vez de "line" tambien para las capas de linea (rios,
+          // vias pecuarias): con "line" el texto tiene que caber A LO
+          // LARGO del propio tramo, así que un tramo corto (muy comun en
+          // rios) no mostraba nombre hasta hacer mucho zoom. Con "point"
+          // se ancla en el centro del tramo sin depender de su longitud en
+          // pantalla -- aparece igual de "sin nombre real" o "con nombre"
+          // que antes, solo que ya no exige que el tramo sea largo.
+          "symbol-placement": "point",
           "text-max-width": 8,
         },
         paint: {
@@ -158,9 +191,13 @@ document.querySelectorAll('input[name="basemap"]').forEach((el) => {
 });
 
 function layerIds(l) {
-  const ids = l.geom === "polygon" ? [`${l.id}-fill`, `${l.id}-line`] : [`${l.id}-line`];
-  if (l.labelField) ids.push(`${l.id}-label`);
-  return ids;
+  return l.geom === "polygon" ? [`${l.id}-fill`, `${l.id}-line`] : [`${l.id}-line`];
+}
+
+function applyLabelVisibility(l) {
+  if (!l.labelField || !map.getLayer(`${l.id}-label`)) return;
+  const vis = layerVisible[l.id] && labelVisible[l.id] ? "visible" : "none";
+  map.setLayoutProperty(`${l.id}-label`, "visibility", vis);
 }
 
 function setLayerVisible(l, visible) {
@@ -169,6 +206,12 @@ function setLayerVisible(l, visible) {
   for (const id of layerIds(l)) {
     if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", vis);
   }
+  applyLabelVisibility(l);
+}
+
+function setLabelVisible(l, visible) {
+  labelVisible[l.id] = visible;
+  applyLabelVisibility(l);
 }
 
 function currentBasemapKey() {
@@ -215,6 +258,10 @@ function syncPanelToMap() {
     const layer = LAYERS.find((l) => l.id === sl.dataset.id);
     if (layer) setLayerOpacity(layer, Number(sl.value) / 100);
   });
+  document.querySelectorAll(".layer-label-toggle").forEach((cb) => {
+    const layer = LAYERS.find((l) => l.id === cb.dataset.id);
+    if (layer) setLabelVisible(layer, cb.checked);
+  });
 }
 
 // --- Panel de capas / leyenda ---
@@ -245,6 +292,9 @@ function buildLayerPanel() {
               <span class="layer-name">${l.nombre}</span>
             </label>
             <span class="layer-order-btns">
+              ${l.labelField ? `<label class="label-toggle-btn" title="Mostrar/ocultar nombres">
+                <input type="checkbox" class="layer-label-toggle" data-id="${l.id}" ${labelVisible[l.id] ? "checked" : ""}>Aa
+              </label>` : ""}
               <button class="layer-order-btn" data-id="${l.id}" data-dir="up" ${disabledUp} title="Dibujar más encima">▲</button>
               <button class="layer-order-btn" data-id="${l.id}" data-dir="down" ${disabledDown} title="Dibujar más debajo">▼</button>
             </span>
@@ -266,6 +316,12 @@ function buildLayerPanel() {
     sl.addEventListener("input", () => {
       const layer = LAYERS.find((l) => l.id === sl.dataset.id);
       setLayerOpacity(layer, Number(sl.value) / 100);
+    });
+  });
+  panel.querySelectorAll(".layer-label-toggle").forEach((cb) => {
+    cb.addEventListener("change", () => {
+      const layer = LAYERS.find((l) => l.id === cb.dataset.id);
+      setLabelVisible(layer, cb.checked);
     });
   });
   panel.querySelectorAll(".layer-order-btn").forEach((btn) => {

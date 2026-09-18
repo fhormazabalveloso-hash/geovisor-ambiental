@@ -1,0 +1,242 @@
+// Cruce cuantitativo de afecciones: el buffer de un tramo/punto subido
+// contra las capas ambientales de Nivel 1 (obligatorio) y Nivel 2
+// (estimado). El Nivel 3 queda fuera del cruce automatico -- es solo
+// contexto activable, no una afeccion juridica (ver README §5/§6).
+//
+// IMPORTANTE -- esto es una ESTIMACION de cribado, no un calculo de
+// precision catastral: los datos vienen de teselas vectoriales (MVT), que
+// simplifican algo la geometria segun el zoom, y las features se
+// consultan tal como MapLibre las tiene renderizadas en ese momento
+// (recortadas por tesela, sin deduplicar posibles solapes minimos en los
+// bordes de tesela). Para una memoria definitiva de licitacion, esto es
+// un punto de partida -- el dato preciso sigue saliendo de QGIS.
+
+const ANALYSIS_NIVELES = [1, 2];
+const ANALYSIS_CHUNK_KM = 0.01; // 10 m -- granularidad para medir longitud de linea dentro del buffer
+
+// Mismos valores placeholder que main.js filtra en las etiquetas del mapa
+// (ver comentario junto a "text-field" en main.js) -- una capa que use
+// alguno de estos como nombre en realidad no tiene nombre propio.
+const ANALYSIS_PLACEHOLDER_NAMES = new Set(["sin nombre", "s/n", "sin identificar", ""]);
+
+let lastAnalysisResults = null;
+
+// Une todos los poligonos de buffer (puede haber uno por elemento subido)
+// en un unico poligono, para no contar dos veces el area donde se solapan.
+function unifyBuffer(bufferFC) {
+  const feats = bufferFC.features.filter((f) => f.geometry);
+  if (feats.length === 0) return null;
+  let result = feats[0];
+  for (let i = 1; i < feats.length; i++) {
+    try {
+      const u = turf.union(result, feats[i]);
+      if (u) result = u;
+    } catch (e) {
+      console.warn("No se pudo unir un poligono de buffer:", e);
+    }
+  }
+  return result;
+}
+
+function lineLengthInsidePolygonMeters(lineFeature, polygonFeature) {
+  const geom = lineFeature.geometry;
+  const lines =
+    geom.type === "MultiLineString"
+      ? geom.coordinates.map((c) => turf.lineString(c))
+      : [lineFeature];
+
+  let totalKm = 0;
+  for (const line of lines) {
+    let chunks;
+    try {
+      chunks = turf.lineChunk(line, ANALYSIS_CHUNK_KM, { units: "kilometers" }).features;
+    } catch (e) {
+      chunks = [line];
+    }
+    for (const chunk of chunks) {
+      const len = turf.length(chunk, { units: "kilometers" });
+      if (len === 0) continue;
+      const mid = turf.along(chunk, len / 2, { units: "kilometers" });
+      if (turf.booleanPointInPolygon(mid, polygonFeature)) {
+        totalKm += len;
+      }
+    }
+  }
+  return totalKm * 1000;
+}
+
+function polygonIntersectionHectares(envFeature, bufferFeature) {
+  let inter;
+  try {
+    inter = turf.intersect(envFeature, bufferFeature);
+  } catch (e) {
+    return 0;
+  }
+  if (!inter) return 0;
+  return turf.area(inter) / 10000;
+}
+
+async function analyzeUploadedLayer(u) {
+  if (!u.bufferMeters || !u.bufferGeojson || u.bufferGeojson.features.length === 0) {
+    alert("Aplica primero un buffer a este tramo para poder analizar las afecciones.");
+    return;
+  }
+
+  const overlay = document.getElementById("analysis-overlay");
+  overlay.hidden = false;
+
+  try {
+    const bufferPolygon = unifyBuffer(u.bufferGeojson);
+    if (!bufferPolygon) throw new Error("No se pudo calcular el buffer.");
+
+    const bbox = turf.bbox(bufferPolygon);
+    map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], {
+      padding: 60,
+      animate: false,
+      maxZoom: 17,
+    });
+
+    const targetLayers = LAYERS.filter((l) => ANALYSIS_NIVELES.includes(l.nivel));
+
+    // Se fuerzan temporalmente visibles las capas a analizar -- MapLibre
+    // solo tiene datos consultables (renderizados) para capas visibles,
+    // asi que se restaura el estado original al terminar.
+    const prevVisible = {};
+    for (const l of targetLayers) {
+      prevVisible[l.id] = layerVisible[l.id];
+      if (!layerVisible[l.id]) setLayerVisible(l, true);
+    }
+
+    await new Promise((resolve) => {
+      map.once("idle", resolve);
+      setTimeout(resolve, 8000);
+    });
+
+    const results = [];
+    for (const l of targetLayers) {
+      const idsToCheck = l.geom === "polygon" ? [`${l.id}-fill`] : [`${l.id}-line`];
+      const existing = idsToCheck.filter((id) => map.getLayer(id));
+      const nameField = l.analysisNameField || l.labelField;
+      let count = 0;
+      let totalHa = 0;
+      let totalM = 0;
+      const names = new Set();
+      if (existing.length) {
+        const feats = map.queryRenderedFeatures(undefined, { layers: existing });
+        for (const f of feats) {
+          if (!f.geometry) continue;
+          if (!turf.booleanIntersects(f, bufferPolygon)) continue;
+
+          if (nameField) {
+            const raw = f.properties[nameField];
+            const clean = raw == null ? "" : String(raw).trim();
+            if (clean && !ANALYSIS_PLACEHOLDER_NAMES.has(clean.toLowerCase())) names.add(clean);
+          }
+
+          // presenceOnly (p. ej. HIC): la capa trae un poligono repetido
+          // por cada codigo de habitat presente en una misma celda de
+          // malla, asi que ni el conteo de "elementos" ni la superficie
+          // de interseccion son representativos aqui -- se listan los
+          // codigos (arriba) y no se suma area (ver layers.js).
+          if (l.presenceOnly) continue;
+
+          count++;
+          if (l.geom === "polygon") {
+            totalHa += polygonIntersectionHectares(f, bufferPolygon);
+          } else {
+            totalM += lineLengthInsidePolygonMeters(f, bufferPolygon);
+          }
+        }
+      }
+      if (l.presenceOnly) count = names.size;
+      results.push({ layer: l, count, totalHa, totalM, names: [...names].sort() });
+    }
+
+    for (const l of targetLayers) {
+      if (layerVisible[l.id] !== prevVisible[l.id]) setLayerVisible(l, prevVisible[l.id]);
+    }
+
+    showAnalysisResults(u, results);
+  } catch (e) {
+    console.error(e);
+    alert("Error analizando afecciones: " + e.message);
+  } finally {
+    overlay.hidden = true;
+  }
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function showAnalysisResults(u, results) {
+  document.getElementById("analysis-subtitle").textContent =
+    `${u.name} · buffer de ${u.bufferMeters} m · estimación de cribado, no sustituye el análisis en QGIS`;
+
+  const container = document.getElementById("analysis-results");
+  let html = "";
+  let anyPresenceOnly = false;
+  for (const nivel of ANALYSIS_NIVELES) {
+    const rows = results.filter((r) => r.layer.nivel === nivel);
+    const afectadas = rows.filter((r) => r.count > 0);
+    html += `<div class="analysis-nivel-block"><h3>${NIVEL_LABEL[nivel]}</h3>`;
+    if (afectadas.length === 0) {
+      html += `<p class="analysis-empty">Sin afecciones detectadas en este nivel.</p>`;
+    } else {
+      html += `<table class="analysis-table"><thead><tr>
+        <th>Capa</th><th>Elementos</th><th>Nombres / códigos</th><th>Long. afectada (m)</th><th>Superficie afectada (ha)</th>
+      </tr></thead><tbody>`;
+      for (const r of afectadas) {
+        if (r.layer.presenceOnly) anyPresenceOnly = true;
+        const nombres = r.names.length ? escapeHtml(r.names.join(", ")) : "-";
+        const ha = r.layer.presenceOnly
+          ? "—*"
+          : r.totalHa > 0
+            ? r.totalHa.toLocaleString("es-ES", { maximumFractionDigits: 2 })
+            : "-";
+        html += `<tr>
+          <td>${escapeHtml(r.layer.nombre)}</td>
+          <td class="num">${r.count}</td>
+          <td class="names">${nombres}</td>
+          <td class="num">${r.totalM > 0 ? Math.round(r.totalM).toLocaleString("es-ES") : "-"}</td>
+          <td class="num">${ha}</td>
+        </tr>`;
+      }
+      html += `</tbody></table>`;
+    }
+    html += `</div>`;
+  }
+  if (anyPresenceOnly) {
+    html += `<p class="modal-note">* Capa de presencia en malla (no delimitación real): se listan los códigos detectados, no se calcula superficie.</p>`;
+  }
+  container.innerHTML = html;
+
+  lastAnalysisResults = { u, results };
+  document.getElementById("analysis-modal-backdrop").hidden = false;
+}
+
+document.getElementById("analysis-close-btn").addEventListener("click", () => {
+  document.getElementById("analysis-modal-backdrop").hidden = true;
+});
+
+function csvField(s) {
+  return `"${String(s).replace(/"/g, '""')}"`;
+}
+
+document.getElementById("analysis-download-csv").addEventListener("click", () => {
+  if (!lastAnalysisResults) return;
+  const { u, results } = lastAnalysisResults;
+  let csv = "Nivel,Capa,Elementos,Nombres/códigos,Longitud afectada (m),Superficie afectada (ha)\n";
+  for (const r of results) {
+    if (r.count === 0) continue;
+    const ha = r.layer.presenceOnly ? "" : r.totalHa.toFixed(3);
+    csv += `${r.layer.nivel},${csvField(r.layer.nombre)},${r.count},${csvField(r.names.join(" | "))},${r.totalM.toFixed(1)},${ha}\n`;
+  }
+  const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `afecciones_${u.name.replace(/\.[^.]+$/, "")}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+});

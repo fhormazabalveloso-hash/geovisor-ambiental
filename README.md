@@ -59,6 +59,18 @@ Este documento se centra en el **Componente 1**.
   *raster source* en MapLibre. Migración de plugins: `leaflet-omnivore` →
   `@tmcw/togeojson` (KML/GPX); dibujo/edición → `mapbox-gl-draw`. `shpjs` y
   `Turf.js` no cambian (agnósticos del motor de mapa).
+- **(2026-09-18) Cruce cuantitativo de afecciones probado de punta a punta**
+  por primera vez (`src/js/analysis.js`), con un tramo de prueba real sobre
+  Doñana. Bug encontrado y corregido en esa misma sesión: la capa HIC
+  inflaba la superficie de afección ~15x (1.573 ha calculadas en un buffer
+  de 83 ha) porque su fichero de origen guarda **un polígono repetido por
+  cada código de hábitat presente en una misma celda de malla 10×10 km**;
+  sumar área por *feature* sin deduplicar cuenta la misma celda una vez por
+  código. Fix: la capa HIC ya no calcula superficie (`presenceOnly: true`
+  en `layers.js`), en su lugar lista los códigos de hábitat presentes. De
+  paso se añadieron a la tabla de resultados y al CSV exportable los
+  **nombres reales** de los elementos afectados (usando el `labelField` de
+  cada capa), no solo el conteo agregado.
 
 ---
 
@@ -175,14 +187,21 @@ Flujo objetivo *"sube el tramo y saca cartografía"*:
    contexto activable.
 4. Devuelve resultados **cuantitativos** (no solo "qué" cruza, también
    "cuánto"): metros de trazado afectados por capa, hectáreas de afección,
-   punto kilométrico de entrada/salida.
-5. Exporta **tabla de afecciones** (CSV/Excel/Word) para pegar en la memoria.
+   y los **nombres reales de los elementos afectados** (p. ej. "Doñana",
+   "Arroyo de Soto Chico"). Punto kilométrico de entrada/salida: pendiente.
+5. Exporta **tabla de afecciones**. CSV ya implementado; Excel/Word
+   pendiente.
 6. Compone y exporta **cartografía** con cajetín Quadrante.
 
 **DPH:** representar deslindado (borde continuo, validez plena) y probable
 (borde discontinuo, etiqueta "estimado") diferenciados en mapa y leyenda.
 Donde no haya DPH, buffer de 100 m sobre red hidrográfica = zona de policía
 presunta (art. 6 RDPH), documentado como estimación.
+
+**Excepción HIC:** al ser una malla de presencia 10×10 km (no delimitación
+real - ver §5), el cruce no calcula superficie para esta capa; en su lugar
+lista los códigos de hábitat de interés comunitario presentes en las celdas
+tocadas por el buffer.
 
 ---
 
@@ -221,6 +240,24 @@ sigue saliendo de QGIS**; el visor acelera el paso previo (análisis + datos).
   en repo privado o fuera del repositorio público.
 - **Red corporativa:** confirmar que la red del trabajo permite `git push` a
   GitHub (algunas lo bloquean).
+- **Git sin `git.exe`:** este equipo no tiene Git nativo instalado; el
+  histórico local se maneja con **dulwich** (reimplementación de Git en
+  Python puro, entorno miniforge3). `add`/`commit`/`log`/`status`
+  funcionan igual; solo vigilar operaciones más avanzadas (rebase
+  interactivo, algunos hooks) que pueden tener menos soporte.
+- **Servidor de desarrollo local:** PMTiles necesita peticiones HTTP por
+  rangos (`Range`), que `python -m http.server` **no soporta bien** - usar
+  `python -m RangeHTTPServer 8000` (paquete `RangeHTTPServer`, ya
+  instalado) desde la **raíz del proyecto** (no desde `src/`, porque
+  `main.js` referencia las capas como `../data-web/*.pmtiles`, relativo a
+  `index.html`). URL de trabajo: `http://localhost:8000/src/index.html`.
+  Configurado como tarea `geovisor-dev` en `.claude/launch.json`.
+  - El servidor no manda cabeceras `Cache-Control`: tras editar un `.js`,
+    el navegador a veces sigue sirviendo la versión vieja - recarga forzada
+    (Ctrl+Shift+R) si un cambio no se refleja.
+  - Es de un solo hilo: tras muchas peticiones seguidas en una sesión de
+    pruebas intensiva puede quedar lento/colgado - reiniciarlo si el mapa
+    deja de cargar capas.
 
 ---
 
@@ -253,12 +290,23 @@ sigue saliendo de QGIS**; el visor acelera el paso previo (análisis + datos).
 - [x] Subida de tramo/punto: GeoJSON, SHP (.zip) y KML/KMZ
       (`src/js/upload.js`). GPKG pendiente (necesita SQLite-WASM, más
       pesado - se añade si hace falta)
-- [ ] Buffer de afección (25/50/100/200/500 m; 100 m fijo para zona de
-      policía DPH) sobre el tramo subido
-- [ ] Cruce automático cuantitativo con las capas (m, ha, PK) - el
-      corazón del proyecto, aún no empezado
-- [ ] Exportación de tabla de afecciones a Excel/Word
+- [x] Buffer de afección (25/50/100/200/500 m; 100 m fijo para zona de
+      policía DPH) sobre el tramo subido (`src/js/upload.js`)
+- [x] Cruce automático cuantitativo con las capas (m, ha) - el corazón del
+      proyecto, implementado y probado de punta a punta
+      (`src/js/analysis.js`, ver §2 2026-09-18). Devuelve metros/hectáreas
+      afectados y los **nombres reales** de los elementos (no solo
+      conteo). Capas de presencia tipo malla (HIC) se tratan aparte: sin
+      superficie, con lista de códigos.
+- [x] Exportación CSV de la tabla de afecciones, con nombres de los
+      elementos afectados (`src/js/analysis.js`)
+- [ ] Punto kilométrico (PK) de entrada/salida del tramo sobre las capas
+      cruzadas - aplazado explícitamente
+- [ ] Exportación de tabla de afecciones a Excel/Word (CSV ya funciona)
+- [ ] Probar el cruce de afecciones con un tramo/caso **real** (la prueba
+      hecha hasta ahora usa un tramo sintético sobre Doñana)
 - [ ] Generar las 5 capas grandes pendientes (inundabilidad T10/T100/T500,
       DPH cartográfico probable, montes de utilidad pública)
+- [ ] Decidir si el repo de GitHub (actualmente en cuenta personal) pasa a
+      una cuenta/organización de empresa antes del próximo push
 - [ ] (Después) Componente 2 - geovisor de proyectos desde MyMaps
-```

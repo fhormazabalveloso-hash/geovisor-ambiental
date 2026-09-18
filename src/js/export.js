@@ -4,19 +4,31 @@
 //
 // Tecnica: MapLibre dibuja en un lienzo WebGL, así que la captura tiene que
 // pedirsela al propio mapa (map.getCanvas()) -- un "screenshot" normal de
-// la pagina no funciona con WebGL. Para que la imagen exportada tenga
-// buena resolucion de impresion (no la de la ventana del navegador).
+// la pagina no funciona con WebGL.
 //
-// Documentacion sobre la calidad: como el DPI de impresion se logra
-// redimensionando el propio mapa visible a las dimensiones de salida en
-// pixeles (fuera de pantalla, con position:fixed), durante ese momento el
-// mapa cambia de tamano - se hace con el mapa movido fuera del viewport
-// para que no se note, y se restaura al terminar.
+// DISENO DE LA ESCALA -- por que no se "captura la vista tal cual":
+// A3 casi nunca tiene la misma proporcion ancho/alto que la ventana del
+// navegador (y cambiar de tamano de papel no ayuda: toda la serie ISO 216
+// -- A3, A4, A2... -- comparte la misma proporcion). Intentar preservar
+// EXACTAMENTE el encuadre de pantalla dentro de esa forma distinta solo
+// deja dos opciones, ninguna buena: bordes blancos, o mostrar mas area de
+// la esperada. Esto NO es como funciona el software profesional: en el
+// disenador de planos de QGIS, tu ELIGES la escala (1:1.000, 1:5.000...)
+// y el programa calcula el area exacta a mostrar para esa escala y ese
+// tamano de papel -- nunca intenta adivinar el encuadre de una ventana.
+// Aqui se hace lo mismo: el usuario elige (o confirma) una escala en el
+// panel de exportacion, y se ajusta el zoom del mapa a ESA escala exacta
+// antes de capturar, sobre el mismo centro que tenia en pantalla. Al
+// generarse el mapa directamente para la forma de A3, no hay bordes ni
+// recorte ni distorsion -- porque nunca se intenta encajar una forma en
+// otra.
 
 const EXPORT_DPI = 200;
 const MM_PER_IN = 25.4;
 const A3_MM = { w: 420, h: 297 }; // horizontal; vertical = invertido
 const CAJETIN_HEIGHT_RATIO = 0.09;
+const SCREEN_MM_PER_CSS_PX = 25.4 / 96; // convencion estandar (96 DPI) para estimar la escala "de pantalla"
+const SCALE_OPTIONS = [500, 1000, 2000, 2500, 5000, 10000, 25000, 50000, 100000];
 
 function mmToPx(mm, dpi) {
   return Math.round((mm / MM_PER_IN) * dpi);
@@ -24,9 +36,7 @@ function mmToPx(mm, dpi) {
 
 // Tamanos fisicos (mm sobre el papel) de los elementos de la cartografia,
 // para que se vean bien proporcionados independientemente de la resolucion
-// de exportacion (EXPORT_DPI). Usar pixeles fijos aqui era el bug anterior:
-// a resolucion de impresion (miles de pixeles) un texto de "11px" es
-// practicamente invisible en el A3 final.
+// de exportacion (EXPORT_DPI).
 const px = (mm) => mmToPx(mm, EXPORT_DPI);
 
 function loadImage(src) {
@@ -38,15 +48,27 @@ function loadImage(src) {
   });
 }
 
-function haversineMeters(lat1, lon1, lat2, lon2) {
-  const R = 6371000;
-  const toRad = (d) => (d * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(a));
+// Mide metros por pixel CSS en el CENTRO VERTICAL del mapa, ahora mismo --
+// la misma tecnica que usa el control de escala nativo de MapLibre
+// internamente (dos puntos a 100px de distancia, "unproyectados" a
+// coordenadas geograficas, y se mide la distancia real entre ambos).
+function measureMetersPerCssPixel() {
+  const h = map.getContainer().clientHeight / 2;
+  const p1 = map.unproject([0, h]);
+  const p2 = map.unproject([100, h]);
+  return p1.distanceTo(p2) / 100;
+}
+
+// Escala aproximada "1:N" de lo que se ve ahora mismo en pantalla (con la
+// convencion habitual de 96 DPI para pantallas). Solo se usa para sugerir
+// un valor por defecto en el selector -- el usuario puede cambiarlo.
+function currentOnScreenScale() {
+  const metersPerPx = measureMetersPerCssPixel();
+  return (metersPerPx * 1000) / SCREEN_MM_PER_CSS_PX;
+}
+
+function nearestScaleOption(n) {
+  return SCALE_OPTIONS.reduce((a, b) => (Math.abs(b - n) < Math.abs(a - n) ? b : a));
 }
 
 // Elige una distancia "redonda" (1, 2, 5, 10, 20, 50, 100... m/km) que quepa
@@ -61,32 +83,36 @@ function niceScaleDistance(maxMeters) {
   return magnitude;
 }
 
-async function captureMapAtResolution(widthPx, heightPx) {
+async function captureMapAtScale(targetScaleN, mapW, mapH) {
   const mapEl = document.getElementById("map");
   const prevStyle = mapEl.getAttribute("style") || "";
   const dpr = window.devicePixelRatio || 1;
 
-  // Guardamos el encuadre exacto que se ve en pantalla para restaurarlo
-  // despues, y para forzar que la exportacion muestre lo mismo (ver abajo).
-  const originalBounds = map.getBounds();
   const originalCenter = map.getCenter();
   const originalZoom = map.getZoom();
   const originalBearing = map.getBearing();
   const originalPitch = map.getPitch();
 
+  // Ajuste de zoom para llegar a la escala EXACTA elegida, calculado por
+  // proporcion (relativo al zoom actual) en vez de con una formula de
+  // Mercator propia -- así no importa si acertamos la convencion interna
+  // exacta de MapLibre (256 vs 512 px de tesela de referencia, etc.), el
+  // resultado es correcto porque se calibra contra una medicion real del
+  // propio mapa (measureMetersPerCssPixel), no contra una formula.
+  const targetMetersPerOutputPx = (targetScaleN * MM_PER_IN) / 1000 / EXPORT_DPI;
+  const targetMetersPerCssPx = targetMetersPerOutputPx * dpr;
+  const currentMetersPerCssPx = measureMetersPerCssPixel();
+  const zoomAdjustment = Math.log2(currentMetersPerCssPx / targetMetersPerCssPx);
+  const targetZoom = originalZoom + zoomAdjustment;
+
+  map.jumpTo({ center: originalCenter, zoom: targetZoom, bearing: originalBearing, pitch: originalPitch });
+
   mapEl.style.position = "fixed";
   mapEl.style.left = "-99999px";
   mapEl.style.top = "0";
-  mapEl.style.width = `${widthPx / dpr}px`;
-  mapEl.style.height = `${heightPx / dpr}px`;
+  mapEl.style.width = `${mapW / dpr}px`;
+  mapEl.style.height = `${mapH / dpr}px`;
   map.resize();
-
-  // Redimensionar a proporciones A3 con el MISMO zoom numerico muestra MAS
-  // area (el lienzo es mas grande) -- por eso la exportacion salia "mas
-  // alejada" que la vista en pantalla. fitBounds fuerza a que se vea
-  // exactamente el mismo encuadre geografico que tenias, sea cual sea el
-  // tamano/proporcion del lienzo de salida.
-  map.fitBounds(originalBounds, { animate: false, padding: 0 });
 
   await new Promise((resolve) => {
     map.once("idle", resolve);
@@ -94,38 +120,41 @@ async function captureMapAtResolution(widthPx, heightPx) {
     setTimeout(resolve, 8000);
   });
   // Margen extra: la colocacion final de las etiquetas de texto (symbol
-  // layers) puede terminar un poco despues del evento "idle" -- sin esta
-  // espera, la captura a veces salia sin los nombres de las capas.
+  // layers) puede terminar un poco despues del evento "idle".
   await new Promise((resolve) => setTimeout(resolve, 500));
 
+  // Que capas se exportan en la leyenda: solo las que tengan al menos un
+  // elemento REALMENTE dibujado en esta vista concreta (no solo activadas
+  // en el panel).
+  const renderedLayerIds = new Set();
+  for (const l of LAYERS) {
+    const cb = document.querySelector(`.layer-toggle[data-id="${l.id}"]`);
+    if (!cb || !cb.checked) continue;
+    const candidateIds = [`${l.id}-fill`, `${l.id}-line`, `${l.id}-point`].filter((id) => map.getLayer(id));
+    if (candidateIds.length && map.queryRenderedFeatures({ layers: candidateIds }).length > 0) {
+      renderedLayerIds.add(l.id);
+    }
+  }
+
   const dataUrl = map.getCanvas().toDataURL("image/png");
-  const bounds = map.getBounds();
 
   mapEl.setAttribute("style", prevStyle);
   map.resize();
-  map.jumpTo({
-    center: originalCenter,
-    zoom: originalZoom,
-    bearing: originalBearing,
-    pitch: originalPitch,
-  });
+  map.jumpTo({ center: originalCenter, zoom: originalZoom, bearing: originalBearing, pitch: originalPitch });
 
-  return { dataUrl, bounds };
+  return { dataUrl, renderedLayerIds };
 }
 
-function drawScaleBar(ctx, x, y, bounds, mapWidthPx) {
-  const metersWide = haversineMeters(
-    bounds.getSouth(),
-    bounds.getWest(),
-    bounds.getSouth(),
-    bounds.getEast()
-  );
-  const metersPerPx = metersWide / mapWidthPx;
+function drawScaleBar(ctx, x, y, scaleN) {
+  // Como la escala es exactamente la que se eligio (no una estimacion),
+  // se calcula la barra directamente a partir de scaleN -- sin depender
+  // de leer ningun control en pantalla.
+  const metersPerOutputPx = (scaleN * MM_PER_IN) / 1000 / EXPORT_DPI;
   const targetBarPx = px(70); // barra de ~70mm de largo sobre el papel
-  const niceMeters = niceScaleDistance(targetBarPx * metersPerPx);
-  const barPx = niceMeters / metersPerPx;
-
+  const niceMeters = niceScaleDistance(targetBarPx * metersPerOutputPx);
+  const barPx = niceMeters / metersPerOutputPx;
   const label = niceMeters >= 1000 ? `${niceMeters / 1000} km` : `${niceMeters} m`;
+
   const labelSize = px(4.5);
   const captionSize = px(3);
   const boxPad = px(4);
@@ -140,7 +169,6 @@ function drawScaleBar(ctx, x, y, bounds, mapWidthPx) {
   ctx.moveTo(x, y);
   ctx.lineTo(x + barPx, y);
   ctx.stroke();
-  // marcas en los extremos
   [x, x + barPx].forEach((tx) => {
     ctx.beginPath();
     ctx.moveTo(tx, y - px(2));
@@ -153,7 +181,7 @@ function drawScaleBar(ctx, x, y, bounds, mapWidthPx) {
   ctx.textBaseline = "bottom";
   ctx.fillText(label, x, y - px(3));
   ctx.font = `${captionSize}px Arial`;
-  ctx.fillText("Escala gráfica aproximada", x, y + px(9));
+  ctx.fillText(`Escala 1:${scaleN.toLocaleString("es-ES")}`, x, y + px(9));
   ctx.restore();
 }
 
@@ -246,7 +274,7 @@ async function drawCajetin(ctx, x, y, width, height, title, subtitle) {
   ctx.restore();
 }
 
-async function generateCartography(orientation, title, subtitle) {
+async function generateCartography(orientation, title, subtitle, scaleN) {
   const totalMM = orientation === "horizontal"
     ? { w: A3_MM.w, h: A3_MM.h }
     : { w: A3_MM.h, h: A3_MM.w };
@@ -257,7 +285,7 @@ async function generateCartography(orientation, title, subtitle) {
   const mapH = totalH - cajetinH;
   const mapW = totalW;
 
-  const { dataUrl, bounds } = await captureMapAtResolution(mapW, mapH);
+  const { dataUrl, renderedLayerIds } = await captureMapAtScale(scaleN, mapW, mapH);
   const mapImg = await loadImage(dataUrl);
 
   const canvas = document.createElement("canvas");
@@ -270,16 +298,13 @@ async function generateCartography(orientation, title, subtitle) {
   ctx.drawImage(mapImg, 0, 0, mapW, mapH);
 
   const margin = px(8);
-  const visibleLayers = LAYERS.filter((l) => {
-    const cb = document.querySelector(`.layer-toggle[data-id="${l.id}"]`);
-    return cb && cb.checked;
-  });
+  const visibleLayers = LAYERS.filter((l) => renderedLayerIds.has(l.id));
   drawLegend(ctx, margin, margin, visibleLayers, mapH - margin * 2);
 
   const arrowSize = Math.round(totalW * 0.035);
   await drawNorthArrow(ctx, mapW - arrowSize - margin, margin, arrowSize);
 
-  drawScaleBar(ctx, margin, mapH - px(14), bounds, mapW);
+  drawScaleBar(ctx, margin, mapH - px(14), scaleN);
 
   await drawCajetin(ctx, 0, mapH, totalW, cajetinH, title, subtitle);
 
@@ -296,11 +321,15 @@ const exportResult = document.getElementById("export-result");
 const exportPreview = document.getElementById("export-preview");
 const exportDownloadPng = document.getElementById("export-download-png");
 const exportDownloadPdf = document.getElementById("export-download-pdf");
+const exportScaleSelect = document.getElementById("export-scale");
 
 let lastExport = null; // { canvas, totalMM }
 
 exportOpenBtn.addEventListener("click", () => {
   exportResult.hidden = true;
+  // Sugerencia de escala por defecto: la mas cercana a lo que se ve ahora
+  // mismo en pantalla. El usuario puede cambiarla antes de generar.
+  exportScaleSelect.value = String(nearestScaleOption(currentOnScreenScale()));
   exportModalBackdrop.hidden = false;
 });
 
@@ -312,10 +341,11 @@ exportGenerateBtn.addEventListener("click", async () => {
   const orientation = document.querySelector('input[name="export-orientation"]:checked').value;
   const title = document.getElementById("export-title").value.trim() || "Geovisor Ambiental";
   const subtitle = document.getElementById("export-subtitle").value.trim();
+  const scaleN = Number(exportScaleSelect.value);
 
   exportOverlay.hidden = false;
   try {
-    lastExport = await generateCartography(orientation, title, subtitle);
+    lastExport = await generateCartography(orientation, title, subtitle, scaleN);
     exportPreview.src = lastExport.canvas.toDataURL("image/png");
     exportResult.hidden = false;
   } catch (e) {
