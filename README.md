@@ -92,6 +92,13 @@ Este documento se centra en el **Componente 1**.
   De paso: nuevo componente planificado, **geovisor de arqueología**
   (ver §1), y decisión cerrada de mantener el repo en la cuenta personal
   de GitHub (contenido público, no requiere cuenta de empresa).
+- **(2026-09-21) Panel de capas reagrupado por temática.** Coincidiendo
+  con la recomendación ya existente en §5, el panel pasó de agruparse por
+  nivel jurídico a agruparse por temática (espacios protegidos,
+  hidrografía, patrimonio natural, contexto), con el nivel como insignia
+  informativa por fila. El array `LAYERS` se reordenó en el mismo sentido
+  para que el orden de dibujo en el mapa coincida con la agrupación del
+  panel.
 
 ---
 
@@ -336,6 +343,13 @@ sigue saliendo de QGIS**; el visor acelera el paso previo (análisis + datos).
       ya el area total del buffer. `humedales_turberas` sigue sin id
       fiable en el dato de origen - queda documentado como limitación
       conocida en `layers.js`.
+- [x] Panel de capas reorganizado por **temática** (2026-09-21), como
+      recomienda §5, en vez de por nivel jurídico. El nivel pasa a ser una
+      insignia (N1/N2/N3) en cada fila, no la agrupación principal. El
+      orden de dibujo del array `LAYERS` (`src/js/layers.js`) también se
+      reagrupó por temática para que coincida con el panel - el
+      reordenado ▲/▼ ahora se limita a la temática de la fila, no al
+      nivel (`moveLayerInHierarchy` en `src/js/main.js`).
 - [ ] Punto kilométrico (PK) de entrada/salida del tramo sobre las capas
       cruzadas - aplazado explícitamente
 - [ ] Ampliar el rango de buffer disponible (hoy 25-500 m) para el ámbito

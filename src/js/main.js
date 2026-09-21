@@ -218,17 +218,18 @@ function currentBasemapKey() {
   return document.querySelector('input[name="basemap"]:checked').value;
 }
 
-// Cambia el orden de dibujo de una capa dentro de su propio nivel (no se
-// puede sacar del grupo). direction: -1 sube (se dibuja mas encima),
-// +1 baja. Reconstruye el estilo entero porque es la forma mas simple y
-// fiable de reordenar en MapLibre sin tener que mover a mano cada
-// sub-capa (fill/line/label) una por una con moveLayer().
+// Cambia el orden de dibujo de una capa dentro de su propia tematica (no
+// se puede sacar del grupo del panel -- ver buildLayerPanel). direction:
+// -1 sube (se dibuja mas encima), +1 baja. Reconstruye el estilo entero
+// porque es la forma mas simple y fiable de reordenar en MapLibre sin
+// tener que mover a mano cada sub-capa (fill/line/label) una por una con
+// moveLayer().
 function moveLayerInHierarchy(layerId, direction) {
   const idx = LAYERS.findIndex((l) => l.id === layerId);
   if (idx === -1) return;
   const swapIdx = idx + direction;
   if (swapIdx < 0 || swapIdx >= LAYERS.length) return;
-  if (LAYERS[swapIdx].nivel !== LAYERS[idx].nivel) return;
+  if (LAYERS[swapIdx].tematica !== LAYERS[idx].tematica) return;
 
   [LAYERS[idx], LAYERS[swapIdx]] = [LAYERS[swapIdx], LAYERS[idx]];
 
@@ -265,19 +266,25 @@ function syncPanelToMap() {
 }
 
 // --- Panel de capas / leyenda ---
-// Orden de dibujo en el mapa: la ultima capa del array LAYERS se dibuja
-// encima. En el panel se listan al REVES dentro de cada nivel (la que
-// esta mas arriba en el panel = la que se dibuja mas encima en el mapa),
-// que es la convencion habitual (QGIS, Photoshop...).
+// Agrupado por TEMATICA de cara al usuario (README §5), con el nivel
+// juridico como insignia informativa en cada fila -- no como agrupacion
+// principal. Orden de dibujo en el mapa: la ultima capa del array LAYERS
+// se dibuja encima; el array esta agrupado por tematica en ese mismo
+// orden (ver layers.js) para que el reordenado "arriba/abajo" del panel
+// coincida con el array real. Dentro de cada grupo se lista al REVES (la
+// que esta mas arriba en el panel = la que se dibuja mas encima en el
+// mapa), convencion habitual (QGIS, Photoshop...).
 function buildLayerPanel() {
   const panel = document.getElementById("layer-panel");
-  const porNivel = { 1: [], 2: [], 3: [] };
-  for (const l of LAYERS) porNivel[l.nivel].push(l);
+  const porTematica = {};
+  for (const t of TEMATICA_ORDER) porTematica[t] = [];
+  for (const l of LAYERS) porTematica[l.tematica].push(l);
 
   let html = "";
-  for (const nivel of [1, 2, 3]) {
-    const capas = porNivel[nivel].slice().reverse();
-    html += `<div class="nivel-group"><h3>${NIVEL_LABEL[nivel]}</h3>`;
+  for (const tematica of TEMATICA_ORDER) {
+    const capas = porTematica[tematica].slice().reverse();
+    if (capas.length === 0) continue;
+    html += `<div class="tematica-group"><h3>${TEMATICA_LABEL[tematica]}</h3>`;
     capas.forEach((l, i) => {
       const checked = layerVisible[l.id] ? "checked" : "";
       const opacityPct = Math.round(layerOpacity[l.id] * 100);
@@ -289,6 +296,7 @@ function buildLayerPanel() {
             <label>
               <input type="checkbox" class="layer-toggle" data-id="${l.id}" ${checked}>
               <span class="swatch" style="background:${l.color.fill}"></span>
+              <span class="nivel-badge nivel-badge-${l.nivel}" title="${NIVEL_LABEL[l.nivel]}">${NIVEL_BADGE[l.nivel]}</span>
               <span class="layer-name">${l.nombre}</span>
             </label>
             <span class="layer-order-btns">

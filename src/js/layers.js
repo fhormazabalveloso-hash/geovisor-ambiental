@@ -3,15 +3,28 @@
 // el nombre del fichero de origen, no el id de la capa -- verificado con
 // pmtiles.reader sobre cada archivo generado).
 //
+// tematica: agrupacion de cara al usuario en el panel de capas (README
+//        §5) -- espacios_protegidos / hidrografia / patrimonio_natural /
+//        contexto. Es la clave de agrupacion PRINCIPAL del panel.
 // nivel: 1 = afeccion juridica plena (cruce automatico obligatorio)
 //        2 = afeccion estimada / con matiz (etiqueta metodologica)
 //        3 = contexto (activable, no vinculante)
+//        Metadato de cada capa (se muestra como etiqueta en su fila del
+//        panel), ya no es la agrupacion principal -- ver TEMATICA_ORDER.
 // color: propio de cada capa (no compartido por nivel) -- pensado para que
 //        la cartografia exportada distinga cada capa individualmente.
 // labelField: campo de atributo con el nombre del elemento concreto (p.ej.
 //        el nombre de un espacio Red Natura, un rio, una via pecuaria).
 //        null cuando la capa no trae un campo de nombre util -- verificado
 //        contra los campos reales de cada .pmtiles (pmtiles.reader).
+//
+// Orden del array = orden de dibujo en el mapa (el ultimo elemento se
+// dibuja encima). Agrupado por tematica (para que coincida con el panel:
+// ver moveLayerInHierarchy en main.js, que solo permite reordenar dentro
+// de la misma tematica) y, dentro de cada tematica, por nivel ascendente.
+// El grupo "contexto" queda el ultimo a proposito: son lineas de
+// referencia (limites, nucleos) que conviene ver por encima de los
+// rellenos de las demas capas.
 
 const LAYERS = [
   {
@@ -39,17 +52,24 @@ const LAYERS = [
     visibleByDefault: false,
   },
   {
-    id: "vias_pecuarias",
-    nombre: "Vías Pecuarias (RGVP)",
-    tematica: "patrimonio_natural",
-    nivel: 1,
-    sourceLayer: "RGVP_BDN_2024",
-    geom: "line",
-    color: { fill: "#A1662F", line: "#6D4520" }, // marron
-    labelField: "nb_via",
-    idField: "id_cod_vp",
-    sortField: "nm_long", // prioriza tramos mas largos cuando compiten por espacio la etiqueta
-    visibleByDefault: false,
+    id: "hic",
+    nombre: "Hábitats de Interés Comunitario (HIC)",
+    tematica: "espacios_protegidos",
+    nivel: 2,
+    sourceLayer: "ESArt17_HabitDistrib",
+    geom: "polygon",
+    color: { fill: "#8E24AA", line: "#4A148C" }, // morado
+    labelField: null, // malla de codigos de habitat, sin nombre propio
+    visibleByDefault: false, // malla 10x10 = presencia, no delimitacion (README §5)
+    // El fichero de origen trae un poligono repetido por cada codigo de
+    // habitat presente en una misma celda 10x10 km (una celda con 40
+    // codigos = 40 poligonos identicos). Sumar area de interseccion por
+    // feature infla la superficie muchas veces (verificado con un caso de
+    // prueba: 1.573 ha de "afeccion" en un buffer de 83 ha). analysis.js
+    // usa este flag para no calcular superficie de esta capa y listar en
+    // su lugar los codigos de habitat presentes (campo "Code").
+    presenceOnly: true,
+    analysisNameField: "Code",
   },
   {
     id: "dph_deslindado",
@@ -89,26 +109,6 @@ const LAYERS = [
     visibleByDefault: false,
   },
   {
-    id: "hic",
-    nombre: "Hábitats de Interés Comunitario (HIC)",
-    tematica: "espacios_protegidos",
-    nivel: 2,
-    sourceLayer: "ESArt17_HabitDistrib",
-    geom: "polygon",
-    color: { fill: "#8E24AA", line: "#4A148C" }, // morado
-    labelField: null, // malla de codigos de habitat, sin nombre propio
-    visibleByDefault: false, // malla 10x10 = presencia, no delimitacion (README §5)
-    // El fichero de origen trae un poligono repetido por cada codigo de
-    // habitat presente en una misma celda 10x10 km (una celda con 40
-    // codigos = 40 poligonos identicos). Sumar area de interseccion por
-    // feature infla la superficie muchas veces (verificado con un caso de
-    // prueba: 1.573 ha de "afeccion" en un buffer de 83 ha). analysis.js
-    // usa este flag para no calcular superficie de esta capa y listar en
-    // su lugar los codigos de habitat presentes (campo "Code").
-    presenceOnly: true,
-    analysisNameField: "Code",
-  },
-  {
     id: "humedales_turberas",
     nombre: "Humedales y turberas",
     tematica: "hidrografia",
@@ -123,6 +123,19 @@ const LAYERS = [
     // (ver nota sobre margen de tesela MVT) -- superficie puede estar
     // ligeramente sobreestimada si un humedal grande cae en el borde de
     // varias teselas dentro del buffer.
+    visibleByDefault: false,
+  },
+  {
+    id: "vias_pecuarias",
+    nombre: "Vías Pecuarias (RGVP)",
+    tematica: "patrimonio_natural",
+    nivel: 1,
+    sourceLayer: "RGVP_BDN_2024",
+    geom: "line",
+    color: { fill: "#A1662F", line: "#6D4520" }, // marron
+    labelField: "nb_via",
+    idField: "id_cod_vp",
+    sortField: "nm_long", // prioriza tramos mas largos cuando compiten por espacio la etiqueta
     visibleByDefault: false,
   },
   {
@@ -186,4 +199,25 @@ const NIVEL_LABEL = {
   1: "Nivel 1 - Afección plena",
   2: "Nivel 2 - Afección estimada",
   3: "Nivel 3 - Contexto",
+};
+
+// Etiqueta corta para la insignia de nivel en cada fila del panel (ver
+// buildLayerPanel en main.js) -- NIVEL_LABEL es demasiado largo para eso.
+const NIVEL_BADGE = {
+  1: "N1",
+  2: "N2",
+  3: "N3",
+};
+
+// Orden y etiquetas de los grupos del panel de capas (README §5: se
+// agrupa por tematica de cara al usuario, con el nivel juridico como
+// metadato). "contexto" va el ultimo a proposito -- ver nota junto a
+// LAYERS sobre orden de dibujo.
+const TEMATICA_ORDER = ["espacios_protegidos", "hidrografia", "patrimonio_natural", "contexto"];
+
+const TEMATICA_LABEL = {
+  espacios_protegidos: "Espacios protegidos",
+  hidrografia: "Hidrografía",
+  patrimonio_natural: "Patrimonio natural",
+  contexto: "Contexto",
 };
