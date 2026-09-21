@@ -99,6 +99,13 @@ Este documento se centra en el **Componente 1**.
   informativa por fila. El array `LAYERS` se reordenó en el mismo sentido
   para que el orden de dibujo en el mapa coincida con la agrupación del
   panel.
+- **(2026-09-21) Punto kilométrico (PK) y buffers más grandes.** Se
+  amplió el rango de buffer (hasta 1/2/5 km, antes 500 m como máximo) -
+  seguro de hacer ya con el fix de deduplicación entre teselas. Se añadió
+  el cálculo de PK de entrada/salida: por cada entidad afectada se expande
+  su geometría por el buffer aplicado y se busca en qué tramo del trazado
+  **original** cae dentro, reportando el rango PK mínimo-máximo
+  (envolvente - no distingue cruces múltiples de la misma afección).
 
 ---
 
@@ -215,8 +222,10 @@ Flujo objetivo *"sube el tramo y saca cartografía"*:
    contexto activable.
 4. Devuelve resultados **cuantitativos** (no solo "qué" cruza, también
    "cuánto"): metros de trazado afectados por capa, hectáreas de afección,
-   y los **nombres reales de los elementos afectados** (p. ej. "Doñana",
-   "Arroyo de Soto Chico"). Punto kilométrico de entrada/salida: pendiente.
+   los **nombres reales de los elementos afectados** (p. ej. "Doñana",
+   "Arroyo de Soto Chico"), y el **punto kilométrico** de entrada/salida
+   sobre el trazado original (rango envolvente, no cada cruce por
+   separado si el trazado entra y sale varias veces).
 5. Exporta **tabla de afecciones**. CSV ya implementado; Excel/Word
    pendiente.
 6. Compone y exporta **cartografía** con cajetín Quadrante.
@@ -350,10 +359,18 @@ sigue saliendo de QGIS**; el visor acelera el paso previo (análisis + datos).
       reagrupó por temática para que coincida con el panel - el
       reordenado ▲/▼ ahora se limita a la temática de la fila, no al
       nivel (`moveLayerInHierarchy` en `src/js/main.js`).
-- [ ] Punto kilométrico (PK) de entrada/salida del tramo sobre las capas
-      cruzadas - aplazado explícitamente
-- [ ] Ampliar el rango de buffer disponible (hoy 25-500 m) para el ámbito
-      real de una EIA (1-5 km)
+- [x] Punto kilométrico (PK) de entrada/salida (2026-09-21). Por cada
+      entidad afectada, expande su geometría por el mismo buffer usado en
+      el cruce y busca en qué tramo del trazado **original** (no del
+      buffer) cae dentro - reporta el rango PK mínimo-máximo (envolvente,
+      formato `12+340`). Limitación documentada en el propio código: si
+      el trazado entra y sale varias veces de la misma afección, se
+      reporta un único rango que las engloba, no cada cruce por separado
+      (`src/js/analysis.js`: `buildPkLine`/`computePkRange`).
+- [x] Rango de buffer ampliado (2026-09-21): antes 25-500 m, ahora hasta
+      1/2/5 km para el ámbito real de una EIA (avifauna, cuenca
+      hidrográfica) sobre trazados largos (`src/js/upload.js`). Solo fue
+      seguro hacerlo después del fix de deduplicación entre teselas.
 - [ ] Exportación de tabla de afecciones a Excel/Word (CSV ya funciona)
 - [ ] Probar el cruce de afecciones con un tramo/caso **real** (las
       pruebas hechas hasta ahora usan tramos sintéticos sobre Doñana)

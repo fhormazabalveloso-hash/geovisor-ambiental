@@ -14,7 +14,15 @@
 // capa de relleno translucido por debajo del trazado original.
 
 const UPLOAD_COLORS = ["#E91E63", "#00BCD4", "#FF9800", "#673AB7", "#CDDC39", "#F44336", "#3F51B5", "#009688"];
-const BUFFER_OPTIONS = [0, 25, 50, 100, 200, 500]; // metros, 0 = sin buffer
+// metros, 0 = sin buffer. Hasta 500 m para afecciones puntuales (DPH,
+// vias pecuarias); 1-5 km para el ambito de estudio real de una EIA
+// (avifauna, cuenca hidrografica) sobre trazados largos -- ver README §9.
+const BUFFER_OPTIONS = [0, 25, 50, 100, 200, 500, 1000, 2000, 5000];
+
+function bufferLabel(m) {
+  if (m === 0) return "Sin buffer";
+  return m >= 1000 ? `${m / 1000} km` : `${m} m`;
+}
 
 let uploadCounter = 0;
 const uploadedLayers = []; // { id, name, geojson, color, visible, opacity, bufferMeters, bufferOpacity }
@@ -172,7 +180,7 @@ function buildUploadPanel() {
   for (const u of uploadedLayers) {
     const opacityPct = Math.round(u.opacity * 100);
     const bufferOptionsHtml = BUFFER_OPTIONS.map(
-      (m) => `<option value="${m}" ${u.bufferMeters === m ? "selected" : ""}>${m === 0 ? "Sin buffer" : m + " m"}</option>`
+      (m) => `<option value="${m}" ${u.bufferMeters === m ? "selected" : ""}>${bufferLabel(m)}</option>`
     ).join("");
     html += `
       <div class="layer-row upload-row">
