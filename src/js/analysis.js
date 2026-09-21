@@ -7,8 +7,13 @@
 // precision catastral: los datos vienen de teselas vectoriales (MVT), que
 // simplifican algo la geometria segun el zoom, y las features se
 // consultan tal como MapLibre las tiene renderizadas en ese momento
-// (recortadas por tesela, sin deduplicar posibles solapes minimos en los
-// bordes de tesela). Para una memoria definitiva de licitacion, esto es
+// (recortadas por tesela). El pipeline de teselado (GDAL MVT) anade un
+// pequeno margen de solape entre teselas vecinas, asi que una misma
+// entidad puede aparecer repetida en varias teselas dentro del buffer --
+// para las capas con un identificador de entidad fiable (l.idField en
+// layers.js) los fragmentos se agrupan y se unen antes de medir (ver
+// unionFeatureGroup mas abajo); para las que no lo tienen, sigue siendo
+// una aproximacion. Para una memoria definitiva de licitacion, esto es
 // un punto de partida -- el dato preciso sigue saliendo de QGIS.
 
 const ANALYSIS_NIVELES = [1, 2];
@@ -76,6 +81,29 @@ function polygonIntersectionHectares(envFeature, bufferFeature) {
   return turf.area(inter) / 10000;
 }
 
+// El pipeline tesela con el driver MVT de GDAL, que por defecto anade un
+// pequeno margen de solape entre teselas vecinas (para que el renderizado
+// no se vea "cortado" en el borde). Consecuencia: una misma entidad puede
+// aparecer repetida -- entera o en fragmentos parciales -- en varias
+// teselas que caen dentro del buffer. Sumar area/longitud fragmento a
+// fragmento sin deduplicar puede inflar el resultado (verificado con un
+// caso real en HIC: ver layers.js). Para las capas que traen un campo de
+// id real (l.idField), se agrupan los fragmentos de una misma entidad y
+// se unen con turf.union ANTES de medir, para contar cada entidad una
+// sola vez con su geometria completa reconstruida.
+function unionFeatureGroup(feats) {
+  let result = feats[0];
+  for (let i = 1; i < feats.length; i++) {
+    try {
+      const u = turf.union(result, feats[i]);
+      if (u) result = u;
+    } catch (e) {
+      console.warn("No se pudo unir fragmentos de una misma entidad:", e);
+    }
+  }
+  return result;
+}
+
 async function analyzeUploadedLayer(u) {
   if (!u.bufferMeters || !u.bufferGeojson || u.bufferGeojson.features.length === 0) {
     alert("Aplica primero un buffer a este tramo para poder analizar las afecciones.");
@@ -123,28 +151,64 @@ async function analyzeUploadedLayer(u) {
       const names = new Set();
       if (existing.length) {
         const feats = map.queryRenderedFeatures(undefined, { layers: existing });
-        for (const f of feats) {
-          if (!f.geometry) continue;
-          if (!turf.booleanIntersects(f, bufferPolygon)) continue;
+        const intersecting = feats.filter((f) => f.geometry && turf.booleanIntersects(f, bufferPolygon));
 
-          if (nameField) {
-            const raw = f.properties[nameField];
-            const clean = raw == null ? "" : String(raw).trim();
-            if (clean && !ANALYSIS_PLACEHOLDER_NAMES.has(clean.toLowerCase())) names.add(clean);
+        const addName = (f) => {
+          if (!nameField) return;
+          const raw = f.properties[nameField];
+          const clean = raw == null ? "" : String(raw).trim();
+          if (clean && !ANALYSIS_PLACEHOLDER_NAMES.has(clean.toLowerCase())) names.add(clean);
+        };
+
+        if (l.presenceOnly) {
+          // p. ej. HIC: la capa trae un poligono repetido por cada codigo
+          // de habitat presente en una misma celda de malla, asi que ni
+          // el conteo de "elementos" ni la superficie de interseccion son
+          // representativos aqui -- se listan los codigos (via nameField)
+          // y no se suma area (ver layers.js).
+          intersecting.forEach(addName);
+        } else if (l.geom === "polygon" && l.idField) {
+          // Agrupar fragmentos de la misma entidad (repetidos por el
+          // margen de solape entre teselas MVT, ver unionFeatureGroup)
+          // y unirlos antes de medir, para no contar el mismo area mas
+          // de una vez ni de menos si la entidad cae partida en varias
+          // teselas dentro del buffer.
+          const groups = new Map();
+          const noId = [];
+          for (const f of intersecting) {
+            const key = f.properties[l.idField];
+            if (key == null) { noId.push(f); continue; }
+            if (!groups.has(key)) groups.set(key, []);
+            groups.get(key).push(f);
           }
-
-          // presenceOnly (p. ej. HIC): la capa trae un poligono repetido
-          // por cada codigo de habitat presente en una misma celda de
-          // malla, asi que ni el conteo de "elementos" ni la superficie
-          // de interseccion son representativos aqui -- se listan los
-          // codigos (arriba) y no se suma area (ver layers.js).
-          if (l.presenceOnly) continue;
-
-          count++;
-          if (l.geom === "polygon") {
+          for (const group of groups.values()) {
+            addName(group[0]);
+            count++;
+            totalHa += polygonIntersectionHectares(unionFeatureGroup(group), bufferPolygon);
+          }
+          // Fragmentos sin id legible (dato de origen incompleto): se
+          // miden por separado, con el mismo riesgo de sobreestimacion
+          // que antes de este fix -- caso raro, no el camino normal.
+          for (const f of noId) {
+            addName(f);
+            count++;
             totalHa += polygonIntersectionHectares(f, bufferPolygon);
-          } else {
-            totalM += lineLengthInsidePolygonMeters(f, bufferPolygon);
+          }
+        } else {
+          // Capas de linea, o poligonos sin idField fiable (ver
+          // layers.js): se mide fragmento a fragmento como antes. Para
+          // lineas el riesgo de doble conteo por margen de tesela es
+          // pequeno (solo el tramo solapado en el borde, no la entidad
+          // completa); para los poligonos sin id es una limitacion
+          // conocida, documentada en layers.js capa por capa.
+          for (const f of intersecting) {
+            addName(f);
+            count++;
+            if (l.geom === "polygon") {
+              totalHa += polygonIntersectionHectares(f, bufferPolygon);
+            } else {
+              totalM += lineLengthInsidePolygonMeters(f, bufferPolygon);
+            }
           }
         }
       }

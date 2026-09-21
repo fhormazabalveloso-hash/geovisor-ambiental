@@ -23,6 +23,7 @@ const LAYERS = [
     geom: "polygon",
     color: { fill: "#2E7D32", line: "#1B5E20" }, // verde oscuro
     labelField: "SITE_NAME",
+    idField: "site_code", // ver analysis.js: agrupa fragmentos de la misma entidad
     visibleByDefault: false,
   },
   {
@@ -34,6 +35,7 @@ const LAYERS = [
     geom: "polygon",
     color: { fill: "#66BB6A", line: "#2E7D32" }, // verde medio
     labelField: "SITE_NAME",
+    idField: "SITE_CDDA", // codigo CDDA (base de datos europea de areas designadas)
     visibleByDefault: false,
   },
   {
@@ -45,6 +47,7 @@ const LAYERS = [
     geom: "line",
     color: { fill: "#A1662F", line: "#6D4520" }, // marron
     labelField: "nb_via",
+    idField: "id_cod_vp",
     sortField: "nm_long", // prioriza tramos mas largos cuando compiten por espacio la etiqueta
     visibleByDefault: false,
   },
@@ -57,6 +60,7 @@ const LAYERS = [
     geom: "polygon",
     color: { fill: "#1565C0", line: "#0D47A1" }, // azul fuerte
     labelField: "RIO",
+    idField: "ID_ZONA",
     visibleByDefault: false,
   },
   {
@@ -68,6 +72,7 @@ const LAYERS = [
     geom: "polygon",
     color: { fill: "#26A69A", line: "#00695C" }, // verde azulado
     labelField: "IEZH_NAME",
+    idField: "OBJECTID",
     visibleByDefault: false,
   },
   {
@@ -79,6 +84,7 @@ const LAYERS = [
     geom: "line",
     color: { fill: "#42A5F5", line: "#1976D2" }, // azul claro
     labelField: "nom_rio",
+    idField: "OBJECTID",
     sortField: "Shape_Leng", // prioriza tramos mas largos: red muy densa, mucha competencia por hueco
     visibleByDefault: false,
   },
@@ -111,6 +117,12 @@ const LAYERS = [
     geom: "polygon",
     color: { fill: "#00838F", line: "#004D50" }, // cian oscuro
     labelField: null, // el fichero de origen no trae campo de nombre
+    // Sin idField: el origen solo trae "AC" (comunidad autonoma) y
+    // "Superficie", ningun campo sirve como identificador de entidad.
+    // analysis.js no puede agrupar fragmentos de la misma entidad aqui
+    // (ver nota sobre margen de tesela MVT) -- superficie puede estar
+    // ligeramente sobreestimada si un humedal grande cae en el borde de
+    // varias teselas dentro del buffer.
     visibleByDefault: false,
   },
   {

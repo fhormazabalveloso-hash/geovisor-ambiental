@@ -14,7 +14,7 @@ lineal (ferroviario ADIF y carretera). Todo con **software libre**, sin
 licencias ESRI y sin servidores de pago (arquitectura *zero-server*,
 despliegue en GitHub Pages).
 
-El proyecto tiene **tres componentes** independientes pero relacionados:
+El proyecto tiene **cuatro componentes** independientes pero relacionados:
 
 1. **Geovisor Ambiental de afecciones** *(principal, en desarrollo)*
    Carga de capas ambientales nacionales, subida del tramo/punto de la
@@ -26,7 +26,13 @@ El proyecto tiene **tres componentes** independientes pero relacionados:
    licitación / en curso) por temática. Origen: exportación KML/KMZ de
    Google MyMaps → convertido a algo profesional.
 
-3. **Sistematizaciones de Medio Ambiente** *(futuro, otro entorno)*
+3. **Geovisor de arqueología** *(nuevo, planificado - 2026-09-21)*
+   Mismo enfoque zero-server que el Componente 1, aplicado a capas y
+   afecciones de patrimonio arqueológico. Sin especificar todavía
+   (catálogo de datos, alcance del análisis); se detallará cuando se
+   aborde.
+
+4. **Sistematizaciones de Medio Ambiente** *(futuro, otro entorno)*
    Flujos de procesamiento en Python (entorno Miniforge3/conda). Se
    abordará por separado.
 
@@ -71,6 +77,21 @@ Este documento se centra en el **Componente 1**.
   paso se añadieron a la tabla de resultados y al CSV exportable los
   **nombres reales** de los elementos afectados (usando el `labelField` de
   cada capa), no solo el conteo agregado.
+- **(2026-09-21) Causa raíz del bug de teselas, corregida en general.**
+  El bug de HIC del 2026-09-18 no era exclusivo de esa capa: el pipeline
+  tesela con el driver MVT de GDAL, que por defecto deja un margen de
+  solape entre teselas vecinas (para que el renderizado no se corte en el
+  borde) - cualquier capa poligonal cuya geometría cruce varias teselas
+  dentro del buffer puede duplicar área. Fix general: las capas con un
+  identificador de entidad real (`idField` en `layers.js`: `site_code`,
+  `OBJECTID`, `ID_ZONA`, etc.) agrupan sus fragmentos por ese id y los
+  unen con `turf.union` antes de medir. Validado con un tramo sintético de
+  30 km y buffer de 500 m (cruza muchas teselas): ningún resultado supera
+  ya el área total del buffer. `humedales_turberas` no trae un id fiable
+  en el dato de origen y queda como limitación conocida y documentada.
+  De paso: nuevo componente planificado, **geovisor de arqueología**
+  (ver §1), y decisión cerrada de mantener el repo en la cuenta personal
+  de GitHub (contenido público, no requiere cuenta de empresa).
 
 ---
 
@@ -300,13 +321,34 @@ sigue saliendo de QGIS**; el visor acelera el paso previo (análisis + datos).
       superficie, con lista de códigos.
 - [x] Exportación CSV de la tabla de afecciones, con nombres de los
       elementos afectados (`src/js/analysis.js`)
+- [x] Deduplicación de geometría entre teselas MVT en el cruce
+      cuantitativo (2026-09-21). Causa raíz: el pipeline tesela con GDAL
+      MVT, que por defecto anade un margen de solape entre teselas
+      vecinas - cualquier capa poligonal cuya geometria cruce varias
+      teselas dentro del buffer podia duplicar area (no solo HIC, que fue
+      donde se detecto el primer caso). Fix: `layers.js` marca un
+      `idField` (identificador real de cada capa - `site_code`,
+      `OBJECTID`, `ID_ZONA`, etc.) para las capas con uno disponible;
+      `analysis.js` agrupa los fragmentos de una misma entidad por ese id
+      y los une con `turf.union` antes de medir, en vez de sumar
+      fragmento a fragmento. Probado con un tramo sintético de 30 km y
+      buffer de 500 m (spanning muchas teselas): ningún resultado supera
+      ya el area total del buffer. `humedales_turberas` sigue sin id
+      fiable en el dato de origen - queda documentado como limitación
+      conocida en `layers.js`.
 - [ ] Punto kilométrico (PK) de entrada/salida del tramo sobre las capas
       cruzadas - aplazado explícitamente
+- [ ] Ampliar el rango de buffer disponible (hoy 25-500 m) para el ámbito
+      real de una EIA (1-5 km)
 - [ ] Exportación de tabla de afecciones a Excel/Word (CSV ya funciona)
-- [ ] Probar el cruce de afecciones con un tramo/caso **real** (la prueba
-      hecha hasta ahora usa un tramo sintético sobre Doñana)
+- [ ] Probar el cruce de afecciones con un tramo/caso **real** (las
+      pruebas hechas hasta ahora usan tramos sintéticos sobre Doñana)
 - [ ] Generar las 5 capas grandes pendientes (inundabilidad T10/T100/T500,
       DPH cartográfico probable, montes de utilidad pública)
-- [ ] Decidir si el repo de GitHub (actualmente en cuenta personal) pasa a
-      una cuenta/organización de empresa antes del próximo push
+- [x] Decidir cuenta de GitHub para el push → **cuenta personal**
+      (`fhormazabalveloso-hash`), confirmado 2026-09-21: todo el
+      contenido del repo es información pública, no hace falta esperar a
+      una cuenta/organización de empresa
 - [ ] (Después) Componente 2 - geovisor de proyectos desde MyMaps
+- [ ] (Después) Componente 3 - geovisor de arqueología (nuevo,
+      2026-09-21, sin especificar todavía)
