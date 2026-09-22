@@ -104,99 +104,6 @@ function unionFeatureGroup(feats) {
   return result;
 }
 
-// --- Punto kilometrico (PK) de entrada/salida ---------------------------
-// PK = distancia acumulada en km desde el inicio del trazado ORIGINAL
-// subido (no del buffer) hasta el punto donde empieza/termina de estar
-// dentro del radio de buffer de una entidad afectada.
-//
-// IMPORTANTE -- el "PK 0" de la app es el PRIMER VERTICE DEL ARCHIVO
-// SUBIDO, no el PK oficial del proyecto. Es un PK relativo (geometria
-// pura, distancia geodesica entre vertices) para ubicar afecciones
-// dentro del propio archivo -- si se sube un extracto parcial de un
-// trazado real, no coincidira con el kilometraje oficial de la memoria.
-// No sustituye el PK oficial, hay que cotejarlo a mano contra el
-// proyecto real (ver README §6).
-//
-// Simplificacion documentada: si el tramo subido tiene varias partes
-// (varias features de linea, o una MultiLineString), se concatenan en el
-// orden en que vienen en el archivo para formar UNA referencia continua
-// de PK -- correcto para el caso normal (un unico trazado, quiza partido
-// en varios tramos del mismo archivo), pero puede dar un PK erroneo si
-// las partes no estan en orden o representan trazados distintos sin
-// relacion entre si. Tampoco distingue "entra y sale varias veces": se
-// reporta el rango PK minimo-maximo (envolvente), no cada cruce por
-// separado.
-function buildPkLine(geojson) {
-  const coords = [];
-  for (const f of geojson.features) {
-    if (!f.geometry) continue;
-    if (f.geometry.type === "LineString") coords.push(...f.geometry.coordinates);
-    else if (f.geometry.type === "MultiLineString") {
-      for (const part of f.geometry.coordinates) coords.push(...part);
-    }
-  }
-  if (coords.length < 2) return null;
-  try {
-    return turf.lineString(coords);
-  } catch (e) {
-    return null;
-  }
-}
-
-// Busca, a lo largo de pkLine, los chunks de 10 m cuyo punto medio cae
-// dentro de targetPolygon, y devuelve el PK (km acumulados desde el
-// inicio de pkLine) minimo y maximo entre ellos.
-function computePkRange(pkLine, targetPolygon) {
-  let chunks;
-  try {
-    chunks = turf.lineChunk(pkLine, ANALYSIS_CHUNK_KM, { units: "kilometers" }).features;
-  } catch (e) {
-    chunks = [pkLine];
-  }
-  let cumKm = 0;
-  let minKm = null;
-  let maxKm = null;
-  for (const chunk of chunks) {
-    const len = turf.length(chunk, { units: "kilometers" });
-    if (len > 0) {
-      const mid = turf.along(chunk, len / 2, { units: "kilometers" });
-      if (turf.booleanPointInPolygon(mid, targetPolygon)) {
-        const pk = cumKm + len / 2;
-        if (minKm === null || pk < minKm) minKm = pk;
-        if (maxKm === null || pk > maxKm) maxKm = pk;
-      }
-    }
-    cumKm += len;
-  }
-  return minKm === null ? null : { minKm, maxKm };
-}
-
-// Expande una entidad afectada por el mismo radio de buffer que se aplico
-// al trazado, y acumula en `acc` el PK minimo/maximo donde pkLine cae
-// dentro de esa entidad expandida -- ver comentario de computePkRange.
-function accumulatePkRange(acc, pkLine, entityGeom, bufferMeters) {
-  if (!pkLine) return;
-  let buffered;
-  try {
-    buffered = turf.buffer(entityGeom, bufferMeters / 1000, { units: "kilometers" });
-  } catch (e) {
-    return;
-  }
-  if (!buffered) return;
-  const range = computePkRange(pkLine, buffered);
-  if (!range) return;
-  if (acc.minKm === null || range.minKm < acc.minKm) acc.minKm = range.minKm;
-  if (acc.maxKm === null || range.maxKm > acc.maxKm) acc.maxKm = range.maxKm;
-}
-
-// "12+340" al estilo de PK de infraestructura lineal (km + metros).
-function formatPK(km) {
-  const meters = Math.round(km * 1000);
-  const kmPart = Math.floor(meters / 1000);
-  const mPart = meters % 1000;
-  return `${kmPart}+${String(mPart).padStart(3, "0")}`;
-}
-
 async function analyzeUploadedLayer(u) {
   if (!u.bufferMeters || !u.bufferGeojson || u.bufferGeojson.features.length === 0) {
     alert("Aplica primero un buffer a este tramo para poder analizar las afecciones.");
@@ -209,7 +116,6 @@ async function analyzeUploadedLayer(u) {
   try {
     const bufferPolygon = unifyBuffer(u.bufferGeojson);
     if (!bufferPolygon) throw new Error("No se pudo calcular el buffer.");
-    const pkLine = buildPkLine(u.geojson); // null si el tramo no trae una linea (p. ej. solo puntos)
 
     const bbox = turf.bbox(bufferPolygon);
     map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], {
@@ -243,7 +149,6 @@ async function analyzeUploadedLayer(u) {
       let totalHa = 0;
       let totalM = 0;
       const names = new Set();
-      const pk = { minKm: null, maxKm: null };
       if (existing.length) {
         const feats = map.queryRenderedFeatures(undefined, { layers: existing });
         const intersecting = feats.filter((f) => f.geometry && turf.booleanIntersects(f, bufferPolygon));
@@ -279,9 +184,7 @@ async function analyzeUploadedLayer(u) {
           for (const group of groups.values()) {
             addName(group[0]);
             count++;
-            const unioned = unionFeatureGroup(group);
-            totalHa += polygonIntersectionHectares(unioned, bufferPolygon);
-            accumulatePkRange(pk, pkLine, unioned, u.bufferMeters);
+            totalHa += polygonIntersectionHectares(unionFeatureGroup(group), bufferPolygon);
           }
           // Fragmentos sin id legible (dato de origen incompleto): se
           // miden por separado, con el mismo riesgo de sobreestimacion
@@ -290,7 +193,6 @@ async function analyzeUploadedLayer(u) {
             addName(f);
             count++;
             totalHa += polygonIntersectionHectares(f, bufferPolygon);
-            accumulatePkRange(pk, pkLine, f, u.bufferMeters);
           }
         } else {
           // Capas de linea, o poligonos sin idField fiable (ver
@@ -307,20 +209,11 @@ async function analyzeUploadedLayer(u) {
             } else {
               totalM += lineLengthInsidePolygonMeters(f, bufferPolygon);
             }
-            accumulatePkRange(pk, pkLine, f, u.bufferMeters);
           }
         }
       }
       if (l.presenceOnly) count = names.size;
-      results.push({
-        layer: l,
-        count,
-        totalHa,
-        totalM,
-        names: [...names].sort(),
-        pkMinKm: l.presenceOnly ? null : pk.minKm,
-        pkMaxKm: l.presenceOnly ? null : pk.maxKm,
-      });
+      results.push({ layer: l, count, totalHa, totalM, names: [...names].sort() });
     }
 
     for (const l of targetLayers) {
@@ -347,7 +240,6 @@ function showAnalysisResults(u, results) {
   const container = document.getElementById("analysis-results");
   let html = "";
   let anyPresenceOnly = false;
-  let anyPk = false;
   for (const nivel of ANALYSIS_NIVELES) {
     const rows = results.filter((r) => r.layer.nivel === nivel);
     const afectadas = rows.filter((r) => r.count > 0);
@@ -356,7 +248,7 @@ function showAnalysisResults(u, results) {
       html += `<p class="analysis-empty">Sin afecciones detectadas en este nivel.</p>`;
     } else {
       html += `<table class="analysis-table"><thead><tr>
-        <th>Capa</th><th>Elementos</th><th>Nombres / códigos</th><th>Long. afectada (m)</th><th>Superficie afectada (ha)</th><th>PK</th>
+        <th>Capa</th><th>Elementos</th><th>Nombres / códigos</th><th>Long. afectada (m)</th><th>Superficie afectada (ha)</th>
       </tr></thead><tbody>`;
       for (const r of afectadas) {
         if (r.layer.presenceOnly) anyPresenceOnly = true;
@@ -366,15 +258,12 @@ function showAnalysisResults(u, results) {
           : r.totalHa > 0
             ? r.totalHa.toLocaleString("es-ES", { maximumFractionDigits: 2 })
             : "-";
-        if (r.pkMinKm != null) anyPk = true;
-        const pk = r.pkMinKm != null ? `${formatPK(r.pkMinKm)} - ${formatPK(r.pkMaxKm)}` : "-";
         html += `<tr>
           <td>${escapeHtml(r.layer.nombre)}</td>
           <td class="num">${r.count}</td>
           <td class="names">${nombres}</td>
           <td class="num">${r.totalM > 0 ? Math.round(r.totalM).toLocaleString("es-ES") : "-"}</td>
           <td class="num">${ha}</td>
-          <td class="num">${pk}</td>
         </tr>`;
       }
       html += `</tbody></table>`;
@@ -383,9 +272,6 @@ function showAnalysisResults(u, results) {
   }
   if (anyPresenceOnly) {
     html += `<p class="modal-note">* Capa de presencia en malla (no delimitación real): se listan los códigos detectados, no se calcula superficie.</p>`;
-  }
-  if (anyPk) {
-    html += `<p class="modal-note">PK: rango mínimo-máximo (no cada cruce por separado) medido sobre el trazado subido, no sobre el buffer. Si el tramo subido tiene varias partes, se concatenan en el orden del archivo.</p>`;
   }
   container.innerHTML = html;
 
@@ -399,7 +285,7 @@ document.getElementById("analysis-close-btn").addEventListener("click", () => {
 
 const RESULTS_HEADER = [
   "Nivel", "Capa", "Elementos", "Nombres/códigos",
-  "Longitud afectada (m)", "Superficie afectada (ha)", "PK inicio", "PK fin",
+  "Longitud afectada (m)", "Superficie afectada (ha)",
 ];
 
 // Fila por capa afectada, con tipos ya listos para CSV (todo texto) o
@@ -416,8 +302,6 @@ function resultsToRows(results) {
       r.names.join(" | "),
       Math.round(r.totalM * 10) / 10,
       r.layer.presenceOnly ? "" : Math.round(r.totalHa * 1000) / 1000,
-      r.pkMinKm != null ? formatPK(r.pkMinKm) : "",
-      r.pkMaxKm != null ? formatPK(r.pkMaxKm) : "",
     ]);
   }
   return rows;
@@ -453,7 +337,7 @@ document.getElementById("analysis-download-xlsx").addEventListener("click", () =
   // pueda leer sin tener que ajustar manualmente al abrir el Excel.
   sheet["!cols"] = [
     { wch: 6 }, { wch: 34 }, { wch: 10 }, { wch: 45 },
-    { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 10 },
+    { wch: 12 }, { wch: 12 },
   ];
 
   const workbook = XLSX.utils.book_new();

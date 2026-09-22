@@ -16,3 +16,8 @@ pipeline/_tmp/
 Thumbs.db
 desktop.ini
 .vscode/
+
+# Descargas del visor durante pruebas locales (el servidor de desarrollo
+# guarda las descargas del navegador en la raiz del proyecto)
+/afecciones_*.csv
+/afecciones_*.xlsx

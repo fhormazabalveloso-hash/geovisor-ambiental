@@ -111,6 +111,15 @@ Este documento se centra en el **Componente 1**.
   De paso, aclarado con Francisco que el PK que calcula la app es
   **relativo a la geometría subida** (PK 0 = primer vértice del archivo),
   no el PK oficial del proyecto - documentado como limitación conocida.
+- **(2026-09-22) PK retirado.** Al plantear la pregunta anterior en voz
+  alta, Francisco decidió que el riesgo de confusión (un PK que parece
+  preciso pero no coincide con el oficial si se sube un extracto parcial)
+  no compensaba tenerlo activo todavía. Se quitó el cálculo de PK por
+  completo (helpers `buildPkLine`/`computePkRange`/`accumulatePkRange`/
+  `formatPK`, columna en la tabla/CSV/Excel) en vez de dejarlo oculto a
+  medias - el código sigue disponible en el historial de Git
+  (`c644f9f6`, `25daf9ad`) si se retoma más adelante, idealmente con un
+  campo de PK inicial manual.
 
 ---
 
@@ -227,16 +236,13 @@ Flujo objetivo *"sube el tramo y saca cartografía"*:
    contexto activable.
 4. Devuelve resultados **cuantitativos** (no solo "qué" cruza, también
    "cuánto"): metros de trazado afectados por capa, hectáreas de afección,
-   los **nombres reales de los elementos afectados** (p. ej. "Doñana",
-   "Arroyo de Soto Chico"), y el **punto kilométrico** de entrada/salida
-   sobre el trazado original (rango envolvente, no cada cruce por
-   separado si el trazado entra y sale varias veces).
-   **Importante:** el PK 0 de la app es el **primer vértice del archivo
-   subido**, no el PK oficial del proyecto - si se sube un extracto
-   parcial de un trazado real, el PK que devuelve la app estará
-   desplazado respecto al PK oficial de la memoria. Es un PK relativo
-   para ubicar afecciones dentro del propio archivo, no un sustituto del
-   kilometraje oficial.
+   y los **nombres reales de los elementos afectados** (p. ej. "Doñana",
+   "Arroyo de Soto Chico"). Punto kilométrico de entrada/salida: **se
+   implementó y se retiró** (ver §2 2026-09-22) - el PK que se podía
+   calcular era relativo al primer vértice del archivo subido, no el PK
+   oficial del proyecto, con riesgo real de confundirse en una memoria si
+   se sube un extracto parcial de un trazado. Pendiente de retomar con un
+   campo de PK inicial manual (ver §9).
 5. Exporta **tabla de afecciones**. CSV y Excel ya implementados; Word
    pendiente.
 6. Compone y exporta **cartografía** con cajetín Quadrante.
@@ -370,14 +376,16 @@ sigue saliendo de QGIS**; el visor acelera el paso previo (análisis + datos).
       reagrupó por temática para que coincida con el panel - el
       reordenado ▲/▼ ahora se limita a la temática de la fila, no al
       nivel (`moveLayerInHierarchy` en `src/js/main.js`).
-- [x] Punto kilométrico (PK) de entrada/salida (2026-09-21). Por cada
-      entidad afectada, expande su geometría por el mismo buffer usado en
-      el cruce y busca en qué tramo del trazado **original** (no del
-      buffer) cae dentro - reporta el rango PK mínimo-máximo (envolvente,
-      formato `12+340`). Limitación documentada en el propio código: si
-      el trazado entra y sale varias veces de la misma afección, se
-      reporta un único rango que las engloba, no cada cruce por separado
-      (`src/js/analysis.js`: `buildPkLine`/`computePkRange`).
+- [ ] Punto kilométrico (PK) de entrada/salida - **implementado y
+      retirado el mismo día (2026-09-21→22)**. Funcionaba (expandía la
+      geometría de cada entidad por el buffer y buscaba en qué tramo del
+      trazado original caía dentro), pero el PK 0 era el primer vértice
+      del **archivo subido**, no el PK oficial del proyecto - riesgo real
+      de que un extracto parcial diera un PK engañoso en una memoria real.
+      Retirado a petición de Francisco hasta tener una forma fiable de
+      ajustarlo (candidato: campo de PK inicial manual que desplace todos
+      los PK calculados). Código aún en el historial de Git si se retoma
+      (commits `c644f9f6` y `25daf9ad`).
 - [x] Rango de buffer ampliado (2026-09-21): antes 25-500 m, ahora hasta
       1/2/5 km para el ámbito real de una EIA (avifauna, cuenca
       hidrográfica) sobre trazados largos (`src/js/upload.js`). Solo fue
