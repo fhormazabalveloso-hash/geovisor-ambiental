@@ -109,6 +109,14 @@ function unionFeatureGroup(feats) {
 // subido (no del buffer) hasta el punto donde empieza/termina de estar
 // dentro del radio de buffer de una entidad afectada.
 //
+// IMPORTANTE -- el "PK 0" de la app es el PRIMER VERTICE DEL ARCHIVO
+// SUBIDO, no el PK oficial del proyecto. Es un PK relativo (geometria
+// pura, distancia geodesica entre vertices) para ubicar afecciones
+// dentro del propio archivo -- si se sube un extracto parcial de un
+// trazado real, no coincidira con el kilometraje oficial de la memoria.
+// No sustituye el PK oficial, hay que cotejarlo a mano contra el
+// proyecto real (ver README §6).
+//
 // Simplificacion documentada: si el tramo subido tiene varias partes
 // (varias features de linea, o una MultiLineString), se concatenan en el
 // orden en que vienen en el archivo para formar UNA referencia continua
@@ -389,6 +397,32 @@ document.getElementById("analysis-close-btn").addEventListener("click", () => {
   document.getElementById("analysis-modal-backdrop").hidden = true;
 });
 
+const RESULTS_HEADER = [
+  "Nivel", "Capa", "Elementos", "Nombres/códigos",
+  "Longitud afectada (m)", "Superficie afectada (ha)", "PK inicio", "PK fin",
+];
+
+// Fila por capa afectada, con tipos ya listos para CSV (todo texto) o
+// Excel (numeros como numeros, no como texto) -- comparten esta funcion
+// para no mantener la logica de "que va en cada columna" por duplicado.
+function resultsToRows(results) {
+  const rows = [];
+  for (const r of results) {
+    if (r.count === 0) continue;
+    rows.push([
+      r.layer.nivel,
+      r.layer.nombre,
+      r.count,
+      r.names.join(" | "),
+      Math.round(r.totalM * 10) / 10,
+      r.layer.presenceOnly ? "" : Math.round(r.totalHa * 1000) / 1000,
+      r.pkMinKm != null ? formatPK(r.pkMinKm) : "",
+      r.pkMaxKm != null ? formatPK(r.pkMaxKm) : "",
+    ]);
+  }
+  return rows;
+}
+
 function csvField(s) {
   return `"${String(s).replace(/"/g, '""')}"`;
 }
@@ -396,13 +430,9 @@ function csvField(s) {
 document.getElementById("analysis-download-csv").addEventListener("click", () => {
   if (!lastAnalysisResults) return;
   const { u, results } = lastAnalysisResults;
-  let csv = "Nivel,Capa,Elementos,Nombres/códigos,Longitud afectada (m),Superficie afectada (ha),PK inicio,PK fin\n";
-  for (const r of results) {
-    if (r.count === 0) continue;
-    const ha = r.layer.presenceOnly ? "" : r.totalHa.toFixed(3);
-    const pkIni = r.pkMinKm != null ? formatPK(r.pkMinKm) : "";
-    const pkFin = r.pkMaxKm != null ? formatPK(r.pkMaxKm) : "";
-    csv += `${r.layer.nivel},${csvField(r.layer.nombre)},${r.count},${csvField(r.names.join(" | "))},${r.totalM.toFixed(1)},${ha},${pkIni},${pkFin}\n`;
+  let csv = RESULTS_HEADER.join(",") + "\n";
+  for (const row of resultsToRows(results)) {
+    csv += row.map((v) => (typeof v === "number" ? v : csvField(v))).join(",") + "\n";
   }
   const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
@@ -411,4 +441,31 @@ document.getElementById("analysis-download-csv").addEventListener("click", () =>
   a.download = `afecciones_${u.name.replace(/\.[^.]+$/, "")}.csv`;
   a.click();
   URL.revokeObjectURL(url);
+});
+
+document.getElementById("analysis-download-xlsx").addEventListener("click", () => {
+  if (!lastAnalysisResults) return;
+  const { u, results } = lastAnalysisResults;
+  const rows = resultsToRows(results);
+
+  const sheet = XLSX.utils.aoa_to_sheet([RESULTS_HEADER, ...rows]);
+  // Anchos de columna aproximados (en caracteres) para que la tabla se
+  // pueda leer sin tener que ajustar manualmente al abrir el Excel.
+  sheet["!cols"] = [
+    { wch: 6 }, { wch: 34 }, { wch: 10 }, { wch: 45 },
+    { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 10 },
+  ];
+
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, sheet, "Afecciones");
+
+  const infoSheet = XLSX.utils.aoa_to_sheet([
+    ["Tramo/punto", u.name],
+    ["Buffer aplicado", bufferLabel(u.bufferMeters)],
+    ["Nota", "Estimación de cribado a partir de teselas vectoriales -- no sustituye el análisis en QGIS. Ver README del proyecto."],
+  ]);
+  infoSheet["!cols"] = [{ wch: 16 }, { wch: 90 }];
+  XLSX.utils.book_append_sheet(workbook, infoSheet, "Info");
+
+  XLSX.writeFile(workbook, `afecciones_${u.name.replace(/\.[^.]+$/, "")}.xlsx`);
 });

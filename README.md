@@ -106,6 +106,11 @@ Este documento se centra en el **Componente 1**.
   su geometría por el buffer aplicado y se busca en qué tramo del trazado
   **original** cae dentro, reportando el rango PK mínimo-máximo
   (envolvente - no distingue cruces múltiples de la misma afección).
+- **(2026-09-22) Exportación a Excel.** Vía SheetJS (cliente, sin
+  servidor), mismas columnas que el CSV pero con tipos numéricos reales.
+  De paso, aclarado con Francisco que el PK que calcula la app es
+  **relativo a la geometría subida** (PK 0 = primer vértice del archivo),
+  no el PK oficial del proyecto - documentado como limitación conocida.
 
 ---
 
@@ -226,7 +231,13 @@ Flujo objetivo *"sube el tramo y saca cartografía"*:
    "Arroyo de Soto Chico"), y el **punto kilométrico** de entrada/salida
    sobre el trazado original (rango envolvente, no cada cruce por
    separado si el trazado entra y sale varias veces).
-5. Exporta **tabla de afecciones**. CSV ya implementado; Excel/Word
+   **Importante:** el PK 0 de la app es el **primer vértice del archivo
+   subido**, no el PK oficial del proyecto - si se sube un extracto
+   parcial de un trazado real, el PK que devuelve la app estará
+   desplazado respecto al PK oficial de la memoria. Es un PK relativo
+   para ubicar afecciones dentro del propio archivo, no un sustituto del
+   kilometraje oficial.
+5. Exporta **tabla de afecciones**. CSV y Excel ya implementados; Word
    pendiente.
 6. Compone y exporta **cartografía** con cajetín Quadrante.
 
@@ -371,7 +382,12 @@ sigue saliendo de QGIS**; el visor acelera el paso previo (análisis + datos).
       1/2/5 km para el ámbito real de una EIA (avifauna, cuenca
       hidrográfica) sobre trazados largos (`src/js/upload.js`). Solo fue
       seguro hacerlo después del fix de deduplicación entre teselas.
-- [ ] Exportación de tabla de afecciones a Excel/Word (CSV ya funciona)
+- [x] Exportación de tabla de afecciones a Excel (2026-09-22), vía
+      **SheetJS** (cliente, sin servidor - `xlsx@0.18.5`). Mismas columnas
+      que el CSV pero con números reales (no texto) para que el Excel sea
+      usable directamente, más una segunda pestaña "Info" con el tramo,
+      el buffer aplicado y la nota de cribado. Word (`.docx`) sigue
+      pendiente - es más difícil de generar 100% en cliente.
 - [ ] Probar el cruce de afecciones con un tramo/caso **real** (las
       pruebas hechas hasta ahora usan tramos sintéticos sobre Doñana)
 - [ ] Generar las 5 capas grandes pendientes (inundabilidad T10/T100/T500,
