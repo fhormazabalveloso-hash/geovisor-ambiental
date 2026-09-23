@@ -34,7 +34,23 @@ const LAYERS = [
     nivel: 1,
     sourceLayer: "reproj",
     geom: "polygon",
-    color: { fill: "#2E7D32", line: "#1B5E20" }, // verde oscuro
+    color: { fill: "#2E7D32", line: "#1B5E20" }, // verde oscuro -- swatch del panel y color por defecto si TIPO trae un valor inesperado
+    // El campo TIPO distingue ZEC/ZEPA/ambas. Verificado contra los
+    // metadatos completos del .pmtiles (no solo lo visible en pantalla):
+    // exactamente 3 valores en todo el catalogo, A/B/C. Correspondencia
+    // segun la convencion estandar del dataset europeo Natura 2000 (de
+    // donde MITECO/REDIAM deriva el suyo) -- no confirmada con un
+    // diccionario de datos explicito de este fichero en concreto, pero
+    // es una convencion muy establecida y los 3 valores encajan
+    // exactamente (p. ej. "Doñana" = C, ZEC+ZEPA a la vez, como se sabe
+    // que es en la realidad). Ver main.js (colorExpression) y export.js
+    // (leyenda de la cartografia exportada).
+    colorByField: "TIPO",
+    colorByValue: {
+      A: { fill: "#D84315", line: "#8C2C0D", label: "ZEPA" }, // naranja -- solo Directiva Aves
+      B: { fill: "#2E7D32", line: "#1B5E20", label: "ZEC" }, // verde -- solo Directiva Habitats
+      C: { fill: "#B71C1C", line: "#7A1313", label: "ZEC + ZEPA" }, // rojo -- ambas superpuestas
+    },
     labelField: "SITE_NAME",
     idField: "site_code", // ver analysis.js: agrupa fragmentos de la misma entidad
     visibleByDefault: false,

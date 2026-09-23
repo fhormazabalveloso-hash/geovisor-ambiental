@@ -47,6 +47,19 @@ for (const l of LAYERS) layerVisible[l.id] = l.visibleByDefault;
 const labelVisible = {};
 for (const l of LAYERS) labelVisible[l.id] = true;
 
+// Color de una capa para fill-color/line-color. Si trae colorByField
+// (p. ej. TIPO en red_natura_2000 -- ver layers.js), devuelve una
+// expresion "match" que colorea cada feature segun ese campo; si no,
+// el color plano de siempre.
+function layerColorExpression(l, channel) {
+  if (!l.colorByField) return l.color[channel];
+  const stops = [];
+  for (const [value, cfg] of Object.entries(l.colorByValue)) {
+    stops.push(value, cfg[channel]);
+  }
+  return ["match", ["get", l.colorByField], ...stops, l.color[channel]];
+}
+
 function buildStyle(basemapKey) {
   const basemap = BASEMAPS[basemapKey];
   const sources = {
@@ -77,7 +90,7 @@ function buildStyle(basemapKey) {
         source: sourceId,
         "source-layer": l.sourceLayer,
         layout: { visibility },
-        paint: { "fill-color": l.color.fill, "fill-opacity": opacity },
+        paint: { "fill-color": layerColorExpression(l, "fill"), "fill-opacity": opacity },
       });
       layers.push({
         id: `${l.id}-line`,
@@ -85,7 +98,7 @@ function buildStyle(basemapKey) {
         source: sourceId,
         "source-layer": l.sourceLayer,
         layout: { visibility },
-        paint: { "line-color": l.color.line, "line-width": 1, "line-opacity": opacity },
+        paint: { "line-color": layerColorExpression(l, "line"), "line-width": 1, "line-opacity": opacity },
       });
     } else {
       layers.push({
@@ -95,7 +108,7 @@ function buildStyle(basemapKey) {
         "source-layer": l.sourceLayer,
         layout: { visibility },
         paint: {
-          "line-color": l.color.line,
+          "line-color": layerColorExpression(l, "line"),
           "line-width": ["interpolate", ["linear"], ["zoom"], 4, 0.6, 12, 2.2],
           "line-opacity": opacity,
         },
@@ -146,7 +159,11 @@ function buildStyle(basemapKey) {
           "text-color": l.color.line,
           "text-halo-color": "#ffffff",
           "text-halo-width": 1.4,
-          "text-opacity": opacity,
+          // Independiente de la transparencia del relleno/linea (ver
+          // setLayerOpacity mas abajo) -- un nombre a medio leer porque
+          // el poligono esta atenuado para ver la ortofoto por debajo no
+          // aporta nada; siempre a maxima opacidad.
+          "text-opacity": 1,
         },
       });
     }
@@ -245,9 +262,8 @@ function setLayerOpacity(l, opacity) {
   if (map.getLayer(`${l.id}-line`)) {
     map.setPaintProperty(`${l.id}-line`, "line-opacity", opacity);
   }
-  if (l.labelField && map.getLayer(`${l.id}-label`)) {
-    map.setPaintProperty(`${l.id}-label`, "text-opacity", opacity);
-  }
+  // El nombre del elemento (text-opacity) es independiente de esto a
+  // proposito -- ver el comentario junto a "text-opacity" en buildStyle.
 }
 
 function syncPanelToMap() {

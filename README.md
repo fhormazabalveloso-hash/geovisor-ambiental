@@ -148,6 +148,15 @@ Este documento se centra en el **Componente 1**.
   `text-size` de cada capa de etiqueta para que el texto ocupe el mismo
   tamaño físico en el papel (~2,9 mm) sea cual sea la escala elegida, y
   lo restaura después. Verificado visualmente en el canvas exportado.
+- **(2026-09-23) ZEC/ZEPA y opacidad de etiquetas.** Probando el visor,
+  Francisco preguntó si se podía distinguir ZEC de ZEPA dentro de Red
+  Natura 2000 - se confirmó que sí (campo `TIPO`, A/B/C) y se coloreó
+  cada polígono según su tipo, con la leyenda de exportación listando
+  solo las variantes presentes en cada vista. De paso, encontró que la
+  opacidad del nombre de un elemento estaba ligada a la del propio
+  polígono/línea (bajar la transparencia del relleno también desvanecía
+  su etiqueta) - ahora son independientes, el texto va siempre a
+  opacidad máxima.
 
 ---
 
@@ -214,7 +223,7 @@ afecciones usa el nivel jurídico para decidir el comportamiento.
 
 | Capa | Fuente | Notas |
 |---|---|---|
-| Red Natura 2000 (ZEC + ZEPA) | MITECO / REDIAM | campo `FIGURA` distingue ZEC/ZEPA/LIC |
+| Red Natura 2000 (ZEC + ZEPA) | MITECO / REDIAM | campo `TIPO` distingue ZEC/ZEPA/ambas (A/B/C - ver §9 2026-09-23; corrige una nota anterior que decía `FIGURA`, campo que no existe en el `.pmtiles` generado) |
 | Espacios Naturales Protegidos (ENP) | MITECO / REDIAM | figuras estatales y autonómicas |
 | Vías Pecuarias (Red General - RGVP) | MITECO / REDIAM | verificar cobertura por CCAA |
 | Montes de Utilidad Pública (CMUP/IEPF) | MITECO | dominio público forestal |
@@ -457,6 +466,21 @@ sigue saliendo de QGIS**; el visor acelera el paso previo (análisis + datos).
       salía diminuto en el papel. `export.js` ahora lo ajusta
       temporalmente antes de capturar para que ocupe un tamaño físico
       constante (~2,9 mm) en cualquier escala de exportación.
+- [x] Red Natura 2000: distinguir ZEC/ZEPA/ambas (2026-09-23, pedido por
+      Francisco probando el visor). El campo `TIPO` (A=ZEPA, B=ZEC,
+      C=ambas - verificado contra los metadatos completos del `.pmtiles`,
+      3 valores en todo el catálogo) ahora colorea cada polígono según su
+      tipo (`layerColorExpression` en `main.js`, vía expresión `match` de
+      MapLibre) en vez de un único verde. La leyenda de la cartografía
+      exportada lista las variantes como filas separadas, pero **solo
+      las que aparecen de verdad en la vista exportada** (misma lógica
+      que ya se aplicaba a nivel de capa completa).
+- [x] Opacidad del nombre de elemento independiente del relleno/línea
+      (2026-09-23, detectado por Francisco). Antes `setLayerOpacity`
+      aplicaba el mismo valor a `fill-opacity`/`line-opacity` y a
+      `text-opacity`, así que bajar la transparencia del polígono también
+      desvanecía su nombre. Ahora el texto va siempre a opacidad máxima,
+      independiente del control de transparencia de la capa.
 - [ ] (Después) Componente 2 - geovisor de proyectos desde MyMaps
 - [ ] (Después) Componente 3 - geovisor de arqueología (nuevo,
       2026-09-21, sin especificar todavía)

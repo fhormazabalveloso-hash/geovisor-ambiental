@@ -155,13 +155,24 @@ async function captureMapAtScale(targetScaleN, mapW, mapH) {
   // Que capas se exportan en la leyenda: solo las que tengan al menos un
   // elemento REALMENTE dibujado en esta vista concreta (no solo activadas
   // en el panel).
+  // Para capas con colorByField (p. ej. TIPO en red_natura_2000 -- ver
+  // layers.js), ademas de si la capa tiene algo dibujado, se anota QUE
+  // valores de ese campo aparecen realmente en esta vista concreta, para
+  // que la leyenda solo liste ZEC/ZEPA/ambas si de verdad hay alguno en
+  // el encuadre exportado (misma logica que ya se aplicaba a nivel de
+  // capa completa, extendida a sus variantes de color).
   const renderedLayerIds = new Set();
+  const renderedFieldValues = new Map(); // l.id -> Set de valores de colorByField presentes
   for (const l of LAYERS) {
     const cb = document.querySelector(`.layer-toggle[data-id="${l.id}"]`);
     if (!cb || !cb.checked) continue;
     const candidateIds = [`${l.id}-fill`, `${l.id}-line`, `${l.id}-point`].filter((id) => map.getLayer(id));
-    if (candidateIds.length && map.queryRenderedFeatures({ layers: candidateIds }).length > 0) {
-      renderedLayerIds.add(l.id);
+    if (!candidateIds.length) continue;
+    const feats = map.queryRenderedFeatures({ layers: candidateIds });
+    if (feats.length === 0) continue;
+    renderedLayerIds.add(l.id);
+    if (l.colorByField) {
+      renderedFieldValues.set(l.id, new Set(feats.map((f) => f.properties[l.colorByField])));
     }
   }
 
@@ -175,7 +186,29 @@ async function captureMapAtScale(targetScaleN, mapW, mapH) {
   map.resize();
   map.jumpTo({ center: originalCenter, zoom: originalZoom, bearing: originalBearing, pitch: originalPitch });
 
-  return { dataUrl, renderedLayerIds };
+  return { dataUrl, renderedLayerIds, renderedFieldValues };
+}
+
+// Expande "capas visibles" a filas de leyenda: una fila por capa
+// normalmente, pero varias para una capa con colorByField (una por cada
+// valor de ese campo presente de verdad en esta vista -- ver
+// renderedFieldValues en captureMapAtScale). Sin esto, red_natura_2000
+// aparecería siempre como un unico verde en vez de distinguir ZEC/ZEPA.
+function buildLegendRows(visibleLayers, renderedFieldValues) {
+  const rows = [];
+  for (const l of visibleLayers) {
+    if (l.colorByField && l.colorByValue) {
+      const present = renderedFieldValues.get(l.id);
+      const baseName = l.nombre.replace(/\s*\([^)]*\)\s*$/, "");
+      for (const [value, cfg] of Object.entries(l.colorByValue)) {
+        if (present && !present.has(value)) continue;
+        rows.push({ fill: cfg.fill, line: cfg.line, nombre: `${baseName} - ${cfg.label}` });
+      }
+    } else {
+      rows.push({ fill: l.color.fill, line: l.color.line, nombre: l.nombre });
+    }
+  }
+  return rows;
 }
 
 function drawScaleBar(ctx, x, y, scaleN) {
@@ -218,7 +251,8 @@ function drawScaleBar(ctx, x, y, scaleN) {
   ctx.restore();
 }
 
-function drawLegend(ctx, x, y, visibleLayers, maxHeight) {
+function drawLegend(ctx, x, y, visibleLayers, maxHeight, renderedFieldValues) {
+  const legendRows = buildLegendRows(visibleLayers, renderedFieldValues);
   const titleSize = px(5.5);
   const rowTextSize = px(4);
   const swatchSize = px(4.5);
@@ -226,8 +260,7 @@ function drawLegend(ctx, x, y, visibleLayers, maxHeight) {
   const padding = px(5);
   const titleBlockH = px(11);
   const width = px(75);
-  const rows = visibleLayers.length;
-  const height = Math.min(maxHeight, padding * 2 + titleBlockH + rows * rowH);
+  const height = Math.min(maxHeight, padding * 2 + titleBlockH + legendRows.length * rowH);
 
   ctx.save();
   ctx.fillStyle = "rgba(255,255,255,0.92)";
@@ -242,18 +275,18 @@ function drawLegend(ctx, x, y, visibleLayers, maxHeight) {
   ctx.fillText("Leyenda", x + padding, y + padding);
 
   let rowY = y + padding + titleBlockH;
-  for (const l of visibleLayers) {
+  for (const row of legendRows) {
     if (rowY + rowH > y + height) break;
-    ctx.fillStyle = l.color.fill;
+    ctx.fillStyle = row.fill;
     ctx.fillRect(x + padding, rowY + (rowH - swatchSize) / 2, swatchSize, swatchSize);
-    ctx.strokeStyle = l.color.line;
+    ctx.strokeStyle = row.line;
     ctx.lineWidth = px(0.25);
     ctx.strokeRect(x + padding, rowY + (rowH - swatchSize) / 2, swatchSize, swatchSize);
 
     ctx.fillStyle = "#222";
     ctx.font = `${rowTextSize}px Arial`;
     ctx.fillText(
-      l.nombre,
+      row.nombre,
       x + padding + swatchSize + px(3),
       rowY + (rowH - rowTextSize) / 2,
       width - padding * 2 - swatchSize - px(3)
@@ -318,7 +351,7 @@ async function generateCartography(orientation, title, subtitle, scaleN) {
   const mapH = totalH - cajetinH;
   const mapW = totalW;
 
-  const { dataUrl, renderedLayerIds } = await captureMapAtScale(scaleN, mapW, mapH);
+  const { dataUrl, renderedLayerIds, renderedFieldValues } = await captureMapAtScale(scaleN, mapW, mapH);
   const mapImg = await loadImage(dataUrl);
 
   const canvas = document.createElement("canvas");
@@ -332,7 +365,7 @@ async function generateCartography(orientation, title, subtitle, scaleN) {
 
   const margin = px(8);
   const visibleLayers = LAYERS.filter((l) => renderedLayerIds.has(l.id));
-  drawLegend(ctx, margin, margin, visibleLayers, mapH - margin * 2);
+  drawLegend(ctx, margin, margin, visibleLayers, mapH - margin * 2, renderedFieldValues);
 
   const arrowSize = Math.round(totalW * 0.035);
   await drawNorthArrow(ctx, mapW - arrowSize - margin, margin, arrowSize);
