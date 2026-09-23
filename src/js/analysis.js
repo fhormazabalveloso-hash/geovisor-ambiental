@@ -144,7 +144,7 @@ async function analyzeUploadedLayer(u) {
     for (const l of targetLayers) {
       const idsToCheck = l.geom === "polygon" ? [`${l.id}-fill`] : [`${l.id}-line`];
       const existing = idsToCheck.filter((id) => map.getLayer(id));
-      const nameField = l.analysisNameField || l.labelField;
+      const nameField = l.labelField;
       let count = 0;
       let totalHa = 0;
       let totalM = 0;
@@ -160,14 +160,7 @@ async function analyzeUploadedLayer(u) {
           if (clean && !ANALYSIS_PLACEHOLDER_NAMES.has(clean.toLowerCase())) names.add(clean);
         };
 
-        if (l.presenceOnly) {
-          // p. ej. HIC: la capa trae un poligono repetido por cada codigo
-          // de habitat presente en una misma celda de malla, asi que ni
-          // el conteo de "elementos" ni la superficie de interseccion son
-          // representativos aqui -- se listan los codigos (via nameField)
-          // y no se suma area (ver layers.js).
-          intersecting.forEach(addName);
-        } else if (l.geom === "polygon" && l.idField) {
+        if (l.geom === "polygon" && l.idField) {
           // Agrupar fragmentos de la misma entidad (repetidos por el
           // margen de solape entre teselas MVT, ver unionFeatureGroup)
           // y unirlos antes de medir, para no contar el mismo area mas
@@ -212,7 +205,6 @@ async function analyzeUploadedLayer(u) {
           }
         }
       }
-      if (l.presenceOnly) count = names.size;
       results.push({ layer: l, count, totalHa, totalM, names: [...names].sort() });
     }
 
@@ -239,7 +231,6 @@ function showAnalysisResults(u, results) {
 
   const container = document.getElementById("analysis-results");
   let html = "";
-  let anyPresenceOnly = false;
   for (const nivel of ANALYSIS_NIVELES) {
     const rows = results.filter((r) => r.layer.nivel === nivel);
     const afectadas = rows.filter((r) => r.count > 0);
@@ -251,13 +242,8 @@ function showAnalysisResults(u, results) {
         <th>Capa</th><th>Elementos</th><th>Nombres / códigos</th><th>Long. afectada (m)</th><th>Superficie afectada (ha)</th>
       </tr></thead><tbody>`;
       for (const r of afectadas) {
-        if (r.layer.presenceOnly) anyPresenceOnly = true;
         const nombres = r.names.length ? escapeHtml(r.names.join(", ")) : "-";
-        const ha = r.layer.presenceOnly
-          ? "—*"
-          : r.totalHa > 0
-            ? r.totalHa.toLocaleString("es-ES", { maximumFractionDigits: 2 })
-            : "-";
+        const ha = r.totalHa > 0 ? r.totalHa.toLocaleString("es-ES", { maximumFractionDigits: 2 }) : "-";
         html += `<tr>
           <td>${escapeHtml(r.layer.nombre)}</td>
           <td class="num">${r.count}</td>
@@ -269,9 +255,6 @@ function showAnalysisResults(u, results) {
       html += `</tbody></table>`;
     }
     html += `</div>`;
-  }
-  if (anyPresenceOnly) {
-    html += `<p class="modal-note">* Capa de presencia en malla (no delimitación real): se listan los códigos detectados, no se calcula superficie.</p>`;
   }
   container.innerHTML = html;
 
@@ -301,7 +284,7 @@ function resultsToRows(results) {
       r.count,
       r.names.join(" | "),
       Math.round(r.totalM * 10) / 10,
-      r.layer.presenceOnly ? "" : Math.round(r.totalHa * 1000) / 1000,
+      Math.round(r.totalHa * 1000) / 1000,
     ]);
   }
   return rows;

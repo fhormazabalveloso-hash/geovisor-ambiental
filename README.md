@@ -157,6 +157,16 @@ Este documento se centra en el **Componente 1**.
   polígono/línea (bajar la transparencia del relleno también desvanecía
   su etiqueta) - ahora son independientes, el texto va siempre a
   opacidad máxima.
+- **(2026-09-23) HIC fuera, "ambas" cambia de color, panel con varios
+  swatches.** Tres ajustes rápidos tras probar lo anterior en vivo: (1)
+  se decidió retirar HIC del catálogo (malla de presencia, sin
+  delimitación real, con un historial de bugs propio); (2) el color de
+  "ZEC + ZEPA" pasó de rojo a morado - Francisco lo vio como una alarma
+  fuera de lugar, y el morado quedó libre justo al quitar HIC (era la
+  única otra capa de ese color); (3) el panel de capas ahora muestra los
+  3 colores de Red Natura 2000 como mini-swatches en vez de un único
+  verde "de resumen" que ya no reflejaba la realidad del mapa - lo pidió
+  Francisco explícitamente al notar la inconsistencia.
 
 ---
 
@@ -237,7 +247,13 @@ afecciones usa el nivel jurídico para decidir el comportamiento.
 | DPH cartográfico probable (Proyecto LINDE) | MITECO | estimado, **sin tramitación** - citar como probable |
 | Láminas de inundación T10 / T100 / T500 | SNCZI · MITECO | por periodo de retorno |
 | Red hidrográfica (Pfafstetter - RiosCompPfafs) | MITECO | base para buffer zona de policía 100 m |
-| Hábitats de Interés Comunitario (HIC) | MITECO | **malla 10×10 = presencia, no delimitación** |
+
+**Hábitats de Interés Comunitario (HIC):** estuvo en el catálogo y se
+retiró (2026-09-23, decisión de Francisco) - era una malla 10×10 km de
+presencia, no delimitación real, y traía consigo un bug de fondo (mismo
+polígono repetido por cada código de hábitat en una celda, ver §2
+2026-09-18). El código y los datos (`data-web/hic.pmtiles`) siguen en el
+repositorio por si se retoma en el futuro con un origen de datos mejor.
 
 ### Nivel 3 - Contexto e información complementaria (activable, no cruce automático)
 
@@ -289,11 +305,6 @@ Flujo objetivo *"sube el tramo y saca cartografía"*:
 (borde discontinuo, etiqueta "estimado") diferenciados en mapa y leyenda.
 Donde no haya DPH, buffer de 100 m sobre red hidrográfica = zona de policía
 presunta (art. 6 RDPH), documentado como estimación.
-
-**Excepción HIC:** al ser una malla de presencia 10×10 km (no delimitación
-real - ver §5), el cruce no calcula superficie para esta capa; en su lugar
-lista los códigos de hábitat de interés comunitario presentes en las celdas
-tocadas por el buffer.
 
 ---
 
@@ -348,9 +359,11 @@ sigue saliendo de QGIS**; el visor acelera el paso previo (análisis + datos).
   `main.js` referencia las capas como `../data-web/*.pmtiles`, relativo a
   `index.html`). URL de trabajo: `http://localhost:8000/src/index.html`.
   Configurado como tarea `geovisor-dev` en `.claude/launch.json`.
-  - El servidor no manda cabeceras `Cache-Control`: tras editar un `.js`,
-    el navegador a veces sigue sirviendo la versión vieja - recarga forzada
-    (Ctrl+Shift+R) si un cambio no se refleja.
+  - El servidor no manda cabeceras `Cache-Control`: tras editar un `.js`
+    **o un `.css`**, el navegador a veces sigue sirviendo la versión
+    vieja - recarga forzada (Ctrl+Shift+R) si un cambio no se refleja.
+    (2026-09-23: un cambio de CSS que parecía no aplicarse resultó ser
+    justo esto, no un error del propio CSS.)
   - Es de un solo hilo: tras muchas peticiones seguidas en una sesión de
     pruebas intensiva puede quedar lento/colgado - reiniciarlo si el mapa
     deja de cargar capas.
@@ -391,9 +404,7 @@ sigue saliendo de QGIS**; el visor acelera el paso previo (análisis + datos).
 - [x] Cruce automático cuantitativo con las capas (m, ha) - el corazón del
       proyecto, implementado y probado de punta a punta
       (`src/js/analysis.js`, ver §2 2026-09-18). Devuelve metros/hectáreas
-      afectados y los **nombres reales** de los elementos (no solo
-      conteo). Capas de presencia tipo malla (HIC) se tratan aparte: sin
-      superficie, con lista de códigos.
+      afectados y los **nombres reales** de los elementos.
 - [x] Exportación CSV de la tabla de afecciones, con nombres de los
       elementos afectados (`src/js/analysis.js`)
 - [x] Deduplicación de geometría entre teselas MVT en el cruce
@@ -471,16 +482,27 @@ sigue saliendo de QGIS**; el visor acelera el paso previo (análisis + datos).
       C=ambas - verificado contra los metadatos completos del `.pmtiles`,
       3 valores en todo el catálogo) ahora colorea cada polígono según su
       tipo (`layerColorExpression` en `main.js`, vía expresión `match` de
-      MapLibre) en vez de un único verde. La leyenda de la cartografía
-      exportada lista las variantes como filas separadas, pero **solo
-      las que aparecen de verdad en la vista exportada** (misma lógica
-      que ya se aplicaba a nivel de capa completa).
+      MapLibre) en vez de un único verde: **verde = ZEC, naranja = ZEPA,
+      morado = ambas** (el rojo inicial se descartó por parecer una
+      alarma/prohibición en vez de "las dos categorías a la vez"). La
+      leyenda de la cartografía exportada lista las variantes como filas
+      separadas, pero **solo las que aparecen de verdad en la vista
+      exportada** (misma lógica que ya se aplicaba a nivel de capa
+      completa). El panel de capas también muestra los 3 colores como
+      mini-swatches junto al checkbox, en vez de un único color de
+      "resumen" que ya no reflejaba lo que se ve en el mapa.
 - [x] Opacidad del nombre de elemento independiente del relleno/línea
       (2026-09-23, detectado por Francisco). Antes `setLayerOpacity`
       aplicaba el mismo valor a `fill-opacity`/`line-opacity` y a
       `text-opacity`, así que bajar la transparencia del polígono también
       desvanecía su nombre. Ahora el texto va siempre a opacidad máxima,
       independiente del control de transparencia de la capa.
+- [x] Capa HIC retirada (2026-09-23, decisión de Francisco). Era una
+      malla de presencia 10×10 km, no delimitación real, con un bug de
+      fondo propio (ver §2 2026-09-18). Fuera del catálogo (`layers.js`)
+      y del código de análisis específico para ella (`presenceOnly` en
+      `analysis.js`, ya sin uso tras quitar HIC). El dato
+      (`data-web/hic.pmtiles`) sigue en el repo por si se retoma.
 - [ ] (Después) Componente 2 - geovisor de proyectos desde MyMaps
 - [ ] (Después) Componente 3 - geovisor de arqueología (nuevo,
       2026-09-21, sin especificar todavía)

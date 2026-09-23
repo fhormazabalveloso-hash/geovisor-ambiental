@@ -49,7 +49,10 @@ const LAYERS = [
     colorByValue: {
       A: { fill: "#D84315", line: "#8C2C0D", label: "ZEPA" }, // naranja -- solo Directiva Aves
       B: { fill: "#2E7D32", line: "#1B5E20", label: "ZEC" }, // verde -- solo Directiva Habitats
-      C: { fill: "#B71C1C", line: "#7A1313", label: "ZEC + ZEPA" }, // rojo -- ambas superpuestas
+      // Morado en vez de rojo (decision 2026-09-23: el rojo se leia como
+      // alarma/prohibicion, no como "las dos categorias a la vez"). Libre
+      // desde que se quito HIC, que era la unica otra capa morada.
+      C: { fill: "#6A1B9A", line: "#4A148C", label: "ZEC + ZEPA" },
     },
     labelField: "SITE_NAME",
     idField: "site_code", // ver analysis.js: agrupa fragmentos de la misma entidad
@@ -66,26 +69,6 @@ const LAYERS = [
     labelField: "SITE_NAME",
     idField: "SITE_CDDA", // codigo CDDA (base de datos europea de areas designadas)
     visibleByDefault: false,
-  },
-  {
-    id: "hic",
-    nombre: "Hábitats de Interés Comunitario (HIC)",
-    tematica: "espacios_protegidos",
-    nivel: 2,
-    sourceLayer: "ESArt17_HabitDistrib",
-    geom: "polygon",
-    color: { fill: "#8E24AA", line: "#4A148C" }, // morado
-    labelField: null, // malla de codigos de habitat, sin nombre propio
-    visibleByDefault: false, // malla 10x10 = presencia, no delimitacion (README §5)
-    // El fichero de origen trae un poligono repetido por cada codigo de
-    // habitat presente en una misma celda 10x10 km (una celda con 40
-    // codigos = 40 poligonos identicos). Sumar area de interseccion por
-    // feature infla la superficie muchas veces (verificado con un caso de
-    // prueba: 1.573 ha de "afeccion" en un buffer de 83 ha). analysis.js
-    // usa este flag para no calcular superficie de esta capa y listar en
-    // su lugar los codigos de habitat presentes (campo "Code").
-    presenceOnly: true,
-    analysisNameField: "Code",
   },
   {
     id: "dph_deslindado",

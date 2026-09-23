@@ -436,6 +436,21 @@ html, body {
   flex-shrink: 0;
 }
 
+/* Varios cuadritos en vez de uno para una capa coloreada por variante
+   (p. ej. ZEC/ZEPA/ambas en Red Natura 2000 -- ver swatchHtml en
+   main.js), para que el panel refleje lo mismo que el mapa. */
+.swatch-group {
+  display: inline-flex;
+  gap: 1px;
+  flex-shrink: 0;
+}
+
+.swatch-mini {
+  width: 8px;
+  height: 12px;
+  border-radius: 1px;
+}
+
 /* --- Columna de controles arriba a la derecha ---
    Todo apilado con flexbox (en vez de "top" fijo adivinado por elemento)
    para que nunca se solapen, sea cual sea la altura real de cada uno. */

@@ -281,6 +281,21 @@ function syncPanelToMap() {
   });
 }
 
+// Swatch de color de una fila del panel. Una capa normal muestra un
+// unico cuadrito con su color; una capa con colorByField (p. ej. TIPO en
+// red_natura_2000 -- ver layers.js) muestra un cuadradito por cada
+// variante en vez de un solo color, para que el panel refleje lo mismo
+// que ya se ve en el mapa (antes se quedaba en un unico color "de
+// resumen", enganoso una vez el mapa empezo a colorear por variante).
+function swatchHtml(l) {
+  if (!l.colorByField) {
+    return `<span class="swatch" style="background:${l.color.fill}"></span>`;
+  }
+  return `<span class="swatch-group">${Object.values(l.colorByValue)
+    .map((cfg) => `<span class="swatch swatch-mini" style="background:${cfg.fill}" title="${cfg.label}"></span>`)
+    .join("")}</span>`;
+}
+
 // --- Panel de capas / leyenda ---
 // Agrupado por TEMATICA de cara al usuario (README §5), con el nivel
 // juridico como insignia informativa en cada fila -- no como agrupacion
@@ -311,7 +326,7 @@ function buildLayerPanel() {
           <div class="layer-row-main">
             <label>
               <input type="checkbox" class="layer-toggle" data-id="${l.id}" ${checked}>
-              <span class="swatch" style="background:${l.color.fill}"></span>
+              ${swatchHtml(l)}
               <span class="nivel-badge nivel-badge-${l.nivel}" title="${NIVEL_LABEL[l.nivel]}">${NIVEL_BADGE[l.nivel]}</span>
               <span class="layer-name">${l.nombre}</span>
             </label>
