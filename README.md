@@ -120,6 +120,17 @@ Este documento se centra en el **Componente 1**.
   medias - el código sigue disponible en el historial de Git
   (`c644f9f6`, `25daf9ad`) si se retoma más adelante, idealmente con un
   campo de PK inicial manual.
+- **(2026-09-23) Varias decisiones de alcance.** (1) Las 5 capas grandes
+  pendientes se dejan para el final - no bloquean nada más. (2) El
+  `.docx` de estado se sigue actualizando pero **nunca entra a Git**
+  (`.gitignore`) - solo vive en la carpeta local. (3) **Word descartado**
+  como formato de exportación - con que el Excel se lea bien alcanza. (4)
+  Formato del Excel mejorado: tabla nativa de Excel, cabecera en azul
+  corporativo, columna de color por capa (igual que en el panel/mapa),
+  filas alternadas y cabecera congelada - cambiada la librería de SheetJS
+  a **ExcelJS** porque la version libre de SheetJS no escribe estilos
+  (ver §9). (5) Push sigue en pausa hasta tener todo bien armado - sin
+  fecha concreta todavía.
 
 ---
 
@@ -243,8 +254,9 @@ Flujo objetivo *"sube el tramo y saca cartografía"*:
    oficial del proyecto, con riesgo real de confundirse en una memoria si
    se sube un extracto parcial de un trazado. Pendiente de retomar con un
    campo de PK inicial manual (ver §9).
-5. Exporta **tabla de afecciones**. CSV y Excel ya implementados; Word
-   pendiente.
+5. Exporta **tabla de afecciones** a CSV y a Excel (con formato: colores
+   del geovisor, cabecera corporativa, filtro automático). Word se
+   descartó - no hace falta.
 6. Compone y exporta **cartografía** con cajetín Quadrante.
 
 **DPH:** representar deslindado (borde continuo, validez plena) y probable
@@ -292,6 +304,10 @@ sigue saliendo de QGIS**; el visor acelera el paso previo (análisis + datos).
   Componente 2 (proyectos/licitaciones) o cualquier dato de expediente,
   **confirmar con Quadrante** qué puede mostrarse. Los datos de proyectos van
   en repo privado o fuera del repositorio público.
+- **`Geovisor Ambiental - Estado del proyecto.docx` nunca entra a Git**
+  (decisión 2026-09-23, `.gitignore`). Se mantiene actualizado como apoyo
+  de trabajo, pero solo vive en la carpeta local - no se versiona ni se
+  sube, por la misma razón de arriba (repo público).
 - **Red corporativa:** confirmar que la red del trabajo permite `git push` a
   GitHub (algunas lo bloquean).
 - **Git sin `git.exe`:** este equipo no tiene Git nativo instalado; el
@@ -390,16 +406,29 @@ sigue saliendo de QGIS**; el visor acelera el paso previo (análisis + datos).
       1/2/5 km para el ámbito real de una EIA (avifauna, cuenca
       hidrográfica) sobre trazados largos (`src/js/upload.js`). Solo fue
       seguro hacerlo después del fix de deduplicación entre teselas.
-- [x] Exportación de tabla de afecciones a Excel (2026-09-22), vía
-      **SheetJS** (cliente, sin servidor - `xlsx@0.18.5`). Mismas columnas
-      que el CSV pero con números reales (no texto) para que el Excel sea
-      usable directamente, más una segunda pestaña "Info" con el tramo,
-      el buffer aplicado y la nota de cribado. Word (`.docx`) sigue
-      pendiente - es más difícil de generar 100% en cliente.
+- [x] Exportación de tabla de afecciones a Excel (cliente, sin
+      servidor). Números reales (no texto). Una segunda pestaña "Info"
+      con el tramo, el buffer aplicado y la nota de cribado. (2026-09-22)
+- [x] Formato de la tabla Excel (2026-09-23, a petición de Francisco):
+      **tabla nativa de Excel** (con desplegables de filtro incluidos),
+      cabecera en azul corporativo Quadrante, columna de color por fila
+      igual al color de esa capa en el panel/mapa, filas alternadas, y
+      cabecera congelada. **Word queda descartado** - no hace falta, con
+      que el Excel se lea bien es suficiente.
+      **Cambio de librería:** se empezó con SheetJS (`xlsx@0.18.5`, usada
+      el 2026-09-22 solo para la exportación sin formato) pero su versión
+      libre no escribe estilos/colores en el archivo - se probó
+      explícitamente (round-trip: el color desaparecía al releer el
+      archivo guardado) antes de darlo por bueno. Se cambió a **ExcelJS**
+      (`exceljs@4`, MIT, también libre), que sí escribe colores, tablas
+      nativas y congelar paneles correctamente - verificado con el mismo
+      tipo de prueba round-trip.
 - [ ] Probar el cruce de afecciones con un tramo/caso **real** (las
       pruebas hechas hasta ahora usan tramos sintéticos sobre Doñana)
 - [ ] Generar las 5 capas grandes pendientes (inundabilidad T10/T100/T500,
-      DPH cartográfico probable, montes de utilidad pública)
+      DPH cartográfico probable, montes de utilidad pública) - **dejado
+      para el final** (decisión 2026-09-23), no bloquea nada más del
+      proyecto
 - [x] Decidir cuenta de GitHub para el push → **cuenta personal**
       (`fhormazabalveloso-hash`), confirmado 2026-09-21: todo el
       contenido del repo es información pública, no hace falta esperar a

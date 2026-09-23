@@ -327,29 +327,77 @@ document.getElementById("analysis-download-csv").addEventListener("click", () =>
   URL.revokeObjectURL(url);
 });
 
-document.getElementById("analysis-download-xlsx").addEventListener("click", () => {
+// Cabecera en el azul corporativo Quadrante (mismo tono que el cajetin,
+// ver --quadrante-blue en style.css) y una columna de "Color" por fila
+// con el mismo color que esa capa tiene en el panel/mapa (l.color.fill
+// en layers.js), para que la tabla se pueda leer de un vistazo sin tener
+// que darle formato a mano en Excel. Se usa ExcelJS (no SheetJS) porque
+// SheetJS solo escribe estilos/colores en su version de pago -- se probo
+// y el color no sobrevivia al guardar el archivo.
+const XLSX_HEADER_FILL = "FF182C54";
+const XLSX_BAND_FILL = "FFF2F2F2";
+
+document.getElementById("analysis-download-xlsx").addEventListener("click", async () => {
   if (!lastAnalysisResults) return;
   const { u, results } = lastAnalysisResults;
-  const rows = resultsToRows(results);
+  const afectadas = results.filter((r) => r.count > 0);
+  const rows = resultsToRows(results); // mismo filtro/orden que `afectadas`
 
-  const sheet = XLSX.utils.aoa_to_sheet([RESULTS_HEADER, ...rows]);
-  // Anchos de columna aproximados (en caracteres) para que la tabla se
-  // pueda leer sin tener que ajustar manualmente al abrir el Excel.
-  sheet["!cols"] = [
-    { wch: 6 }, { wch: 34 }, { wch: 10 }, { wch: 45 },
-    { wch: 12 }, { wch: 12 },
-  ];
+  const header = ["Nivel", "Capa", "Color", "Elementos", "Nombres/códigos", "Longitud afectada (m)", "Superficie afectada (ha)"];
+  const tableRows = rows.map(([nivel, capa, count, nombres, m, ha]) => [nivel, capa, "", count, nombres, m, ha]);
 
-  const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, sheet, "Afecciones");
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet("Afecciones");
 
-  const infoSheet = XLSX.utils.aoa_to_sheet([
+  // Tabla nativa de Excel (con desplegables de filtro incluidos) - el
+  // color propio y las bandas se aplican encima a mano para seguir la
+  // paleta del geovisor en vez del tema con nombre que trae addTable.
+  sheet.addTable({
+    name: "TablaAfecciones",
+    ref: "A1",
+    headerRow: true,
+    style: { showRowStripes: false },
+    columns: header.map((name) => ({ name })),
+    rows: tableRows,
+  });
+
+  [6, 34, 4, 10, 45, 16, 16].forEach((w, i) => {
+    sheet.getColumn(i + 1).width = w;
+  });
+
+  sheet.getRow(1).eachCell((cell) => {
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: XLSX_HEADER_FILL } };
+    cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+  });
+
+  afectadas.forEach((r, i) => {
+    const row = sheet.getRow(i + 2);
+    const layerColor = "FF" + r.layer.color.fill.replace("#", "");
+    const band = i % 2 === 1 ? XLSX_BAND_FILL : "FFFFFFFF";
+    for (let c = 1; c <= header.length; c++) {
+      row.getCell(c).fill = { type: "pattern", pattern: "solid", fgColor: { argb: c === 3 ? layerColor : band } };
+    }
+    row.getCell(5).alignment = { wrapText: true, vertical: "top" };
+  });
+
+  sheet.views = [{ state: "frozen", ySplit: 1 }];
+
+  const infoSheet = workbook.addWorksheet("Info");
+  infoSheet.getColumn(1).width = 16;
+  infoSheet.getColumn(1).font = { bold: true };
+  infoSheet.getColumn(2).width = 90;
+  infoSheet.addRows([
     ["Tramo/punto", u.name],
     ["Buffer aplicado", bufferLabel(u.bufferMeters)],
     ["Nota", "Estimación de cribado a partir de teselas vectoriales -- no sustituye el análisis en QGIS. Ver README del proyecto."],
   ]);
-  infoSheet["!cols"] = [{ wch: 16 }, { wch: 90 }];
-  XLSX.utils.book_append_sheet(workbook, infoSheet, "Info");
 
-  XLSX.writeFile(workbook, `afecciones_${u.name.replace(/\.[^.]+$/, "")}.xlsx`);
+  const buf = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `afecciones_${u.name.replace(/\.[^.]+$/, "")}.xlsx`;
+  a.click();
+  URL.revokeObjectURL(url);
 });
