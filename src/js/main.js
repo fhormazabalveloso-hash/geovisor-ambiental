@@ -80,6 +80,15 @@ function buildStyle(basemapKey) {
       url: `pmtiles://../data-web/${l.id}.pmtiles`,
     };
 
+    // Fuente de puntos de etiqueta, separada del poligono/linea propios
+    // de la capa -- ver comentario junto a la capa "-label" mas abajo.
+    if (l.labelField) {
+      sources[`${sourceId}-labels`] = {
+        type: "vector",
+        url: `pmtiles://../data-web/${l.id}_labels.pmtiles`,
+      };
+    }
+
     const visibility = layerVisible[l.id] ? "visible" : "none";
     const opacity = layerOpacity[l.id];
 
@@ -119,15 +128,25 @@ function buildStyle(basemapKey) {
       layers.push({
         id: `${l.id}-label`,
         type: "symbol",
-        source: sourceId,
-        "source-layer": l.sourceLayer,
+        // Fuente de puntos DEDICADA (<id>_labels.pmtiles, generada por
+        // pipeline/build_tiles.py --labels-only), no el poligono/linea de
+        // la propia capa. Un poligono/linea grande cruza muchas teselas,
+        // y MapLibre coloca un simbolo de texto POR TESELA -- con la
+        // geometria original eso repetia el mismo nombre muchas veces
+        // sobre la misma entidad al alejar el zoom (ver README §9
+        // 2026-09-23). La fuente de puntos trae un unico
+        // representative_point() por entidad real (calculado ANTES de
+        // tesela, cuando la geometria aun no esta fragmentada), asi que
+        // cada nombre aparece como mucho una vez por entidad visible.
+        source: `${sourceId}-labels`,
+        "source-layer": "labels",
         minzoom: 7,
         // Cuando hay demasiadas etiquetas candidatas compitiendo por el
         // mismo hueco (redes muy densas como la hidrografica), MapLibre
         // oculta las que no caben -- symbol-sort-key decide cuales ganan
         // esa pugna. Valor mas BAJO = mas prioridad, así que se usa el
-        // campo de longitud en negativo para que los tramos mas largos
-        // (mas relevantes) se muestren antes que los cortos.
+        // campo de longitud en negativo para que las entidades mas largas
+        // (mas relevantes) se muestren antes que las cortas.
         ...(l.sortField ? { "symbol-sort-key": ["-", 0, ["to-number", ["get", l.sortField]]] } : {}),
         layout: {
           visibility: layerVisible[l.id] && labelVisible[l.id] ? "visible" : "none",
@@ -145,13 +164,6 @@ function buildStyle(basemapKey) {
           ],
           "text-font": ["Noto Sans Regular"],
           "text-size": 11,
-          // "point" en vez de "line" tambien para las capas de linea (rios,
-          // vias pecuarias): con "line" el texto tiene que caber A LO
-          // LARGO del propio tramo, así que un tramo corto (muy comun en
-          // rios) no mostraba nombre hasta hacer mucho zoom. Con "point"
-          // se ancla en el centro del tramo sin depender de su longitud en
-          // pantalla -- aparece igual de "sin nombre real" o "con nombre"
-          // que antes, solo que ya no exige que el tramo sea largo.
           "symbol-placement": "point",
           "text-max-width": 8,
         },

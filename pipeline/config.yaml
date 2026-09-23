@@ -30,6 +30,14 @@ layers:
       - "04_espacios_protegidos\\n2000_2025_GeoJson\\n2000_spatial_es_can_proy_end25.geojson"
     minzoom: 0
     maxzoom: 14
+    # Campo de nombre en src/js/layers.js (labelField). Con esto, --labels-only
+    # genera ademas red_natura_2000_labels.pmtiles: UN punto por entidad real
+    # (punto garantizado dentro del poligono, no un centroide que puede caer
+    # fuera en formas concavas), en vez de dejar que MapLibre coloque un
+    # texto por cada fragmento de tesela del poligono -- ver README §9
+    # 2026-09-23 (bug: el mismo nombre se repetia varias veces sobre el
+    # mismo poligono al alejar el zoom).
+    label_field: SITE_NAME
 
   - id: enp
     nombre: "Espacios Naturales Protegidos (ENP)"
@@ -37,11 +45,20 @@ layers:
     nivel: 1
     # revisar: Enp2025_c.json (16.9 MB, probablemente centroides/puntos) y
     # Enp2025_p.json (189.9 MB, poligonos) - se tesela solo el poligono;
-    # el fichero de centroides no aporta geometria de afeccion.
+    # el fichero de centroides no aporta geometria de afeccion... PERO
+    # es justo lo que hace falta para las etiquetas de nombre -- ver
+    # label_source_override mas abajo, en vez de calcular un punto propio.
     fuente:
       - "04_espacios_protegidos\\Enp2025_geojson\\Enp2025_p.json"
     minzoom: 0
     maxzoom: 14
+    label_field: SITE_NAME
+    # Ya existe un fichero de centroides oficial en el origen -- se usa
+    # directamente en vez de calcular un representative_point() propio
+    # (mas fiable: viene del propio proveedor del dato, no es una
+    # aproximacion geometrica nuestra).
+    label_source_override:
+      - "04_espacios_protegidos\\Enp2025_geojson\\Enp2025_c.json"
 
   - id: vias_pecuarias
     nombre: "Vías Pecuarias (Red General - RGVP)"
@@ -51,6 +68,8 @@ layers:
       - "05_patrimonio_natural\\RGVP_Geojson\\RGVP_BDN_2024.geojson"
     minzoom: 0
     maxzoom: 12  # bajado de 15: pmtiles pesaba 149.1 MB, por encima del limite de Git
+    label_field: nb_via
+    sort_field: nm_long  # mismo campo que symbol-sort-key en src/js/main.js
 
   - id: montes_utilidad_publica
     nombre: "Montes de Utilidad Pública (CMUP/IEPF)"
@@ -73,6 +92,7 @@ layers:
       - "02_hidrografia\\dph-deslindado\\DPH_DESLINDADO_20250319.shp"
     minzoom: 0
     maxzoom: 15
+    label_field: RIO
 
   - id: iezh
     nombre: "Inventario Español de Zonas Húmedas (IEZH)"
@@ -82,6 +102,7 @@ layers:
       - "05_patrimonio_natural\\IEZH_GeoJson_2025\\IEZH_P_2025.json"
     minzoom: 0
     maxzoom: 14
+    label_field: IEZH_NAME
 
   # ---------------------------------------------------------------------
   # NIVEL 2 - afección estimada / con matiz (cruce con etiqueta metodológica)
@@ -135,6 +156,8 @@ layers:
       - "02_hidrografia\\RiosCompPfafs\\M_RiosCompletosv2.shp"
     minzoom: 0
     maxzoom: 10  # bajado de 13: pmtiles pesaba 258.4 MB, muy por encima del limite de Git
+    label_field: nom_rio
+    sort_field: Shape_Leng  # mismo campo que symbol-sort-key en src/js/main.js
 
   - id: hic
     nombre: "Hábitats de Interés Comunitario (HIC)"
@@ -168,6 +191,7 @@ layers:
       - "04_espacios_protegidos\\IBA_España_2025_11_05.gpkg"
     minzoom: 0
     maxzoom: 13
+    label_field: NatName
 
   - id: nucleos_urbanos
     nombre: "Núcleos urbanos"

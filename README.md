@@ -167,6 +167,42 @@ Este documento se centra en el **Componente 1**.
   3 colores de Red Natura 2000 como mini-swatches en vez de un único
   verde "de resumen" que ya no reflejaba la realidad del mapa - lo pidió
   Francisco explícitamente al notar la inconsistencia.
+- **(2026-09-23) Nombres de elemento repetidos al alejar el zoom, causa
+  raíz y fix a nivel de pipeline.** Francisco detectó que, en zonas muy
+  grandes (p. ej. Doñana), el mismo nombre aparecía varias veces sobre el
+  mismo polígono al alejar la vista. Causa raíz: MapLibre coloca **un
+  símbolo de texto por cada tesela** que una geometría cruza - no hay
+  deduplicación entre teselas para etiquetas ancladas a punto (a
+  diferencia de las líneas, que sí continúan el texto de forma nativa).
+  Una entidad grande que cruza 4-5 teselas mostraba su nombre 4-5 veces
+  en el mismo sitio. Fix: en vez de anclar la etiqueta a la geometría
+  propia de la capa (fragmentada por tesela), `pipeline/build_tiles.py`
+  genera una **fuente de puntos dedicada** por cada capa con
+  `label_field` (`--labels-only`, nuevo flag): un único
+  `geometry.representative_point()` por entidad real (punto garantizado
+  dentro del polígono, no un centroide que puede caer fuera en formas
+  cóncavas; para líneas, un punto sobre la propia línea), calculado
+  **antes** de la tesela, cuando la geometría aún no está fragmentada.
+  Cada capa pasa a tener dos `.pmtiles`: el propio (geometría real, para
+  el cruce/relleno/línea) y uno `_labels.pmtiles` (solo puntos, para el
+  símbolo de texto). Caso especial: **ENP** ya traía un fichero oficial
+  de centroides del proveedor (`Enp2025_c.json`) - se usa directamente
+  (`label_source_override` en `config.yaml`) en vez de calcular uno
+  propio, por ser más fiable que una aproximación geométrica nuestra.
+  Verificado en el navegador vía `queryRenderedFeatures`: "Doñana" pasa
+  de aparecer 4-5 veces a exactamente 1 vez entre los 6 nombres
+  distintos visibles en esa zona. Para las capas de **línea** (vías
+  pecuarias, red hidrográfica) se dejó explícitamente que un tramo muy
+  largo repita su nombre varias veces a lo largo de su trazado (se añadió
+  `sort_field` para que, si compiten por hueco, gane el tramo más largo
+  vía `symbol-sort-key`) - es el comportamiento esperado tipo atlas de
+  carreteras, no el mismo bug que en polígonos compactos. Capas
+  afectadas por el fix: `red_natura_2000`, `enp`, `vias_pecuarias`,
+  `dph_deslindado`, `iezh`, `red_hidrografica`, `iba`. Detalle menor:
+  al primer pase se olvidó añadir `label_field` a `iba` en
+  `config.yaml` (capa de Nivel 3/contexto, menos visible durante las
+  pruebas) - detectado por un 404 en la consola del navegador y
+  corregido aparte.
 
 ---
 
@@ -503,6 +539,14 @@ sigue saliendo de QGIS**; el visor acelera el paso previo (análisis + datos).
       y del código de análisis específico para ella (`presenceOnly` en
       `analysis.js`, ya sin uso tras quitar HIC). El dato
       (`data-web/hic.pmtiles`) sigue en el repo por si se retoma.
+- [x] Nombres de elemento repetidos al alejar el zoom en polígonos/líneas
+      grandes (2026-09-23, detectado por Francisco). Fuente de puntos de
+      etiqueta dedicada por capa (`_labels.pmtiles`, generada con
+      `pipeline/build_tiles.py --labels-only`), con un único punto por
+      entidad real en vez de un símbolo por tesela cruzada (ver §2 para
+      el detalle completo). Verificado en las 7 capas con `labelField`:
+      `red_natura_2000`, `enp`, `vias_pecuarias`, `dph_deslindado`,
+      `iezh`, `red_hidrografica`, `iba`.
 - [ ] (Después) Componente 2 - geovisor de proyectos desde MyMaps
 - [ ] (Después) Componente 3 - geovisor de arqueología (nuevo,
       2026-09-21, sin especificar todavía)

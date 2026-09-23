@@ -186,11 +186,124 @@ def build_layer(layer: dict, data_raw_root: Path, output_dir: Path, tmp_dir: Pat
     return out_path, size_mb, elapsed
 
 
+def build_label_points(layer: dict, data_raw_root: Path, output_dir: Path, tmp_dir: Path):
+    """Genera <id>_labels.pmtiles: UN punto por entidad real (no por
+    fragmento de tesela), para que el texto de nombre del visor
+    (src/js/main.js) deje de repetirse sobre el mismo poligono/linea al
+    alejar el zoom -- ver README §9 2026-09-23 y §2 misma fecha para el
+    porque (MapLibre coloca un simbolo de texto por cada fragmento de
+    tesela de la geometria origen, y un poligono/linea grande cruza
+    muchas teselas).
+
+    Si el layer trae label_source_override, se usa ese fichero (ya son
+    puntos, normalmente un centroide oficial del proveedor del dato -- ver
+    ENP en config.yaml). Si no, se calcula geometry.representative_point()
+    sobre la MISMA geometria ya reproyectada que usa build_layer() --
+    garantizado dentro del poligono (a diferencia de un centroide, que
+    puede caer fuera en formas concavas), y para lineas cae sobre la
+    propia linea."""
+    layer_id = layer["id"]
+    label_field = layer.get("label_field")
+    if not label_field:
+        return None
+    print(f"\n=== {layer_id}_labels - puntos de etiqueta ({label_field}) ===")
+    t0 = time.time()
+
+    layer_tmp = tmp_dir / f"{layer_id}_labels"
+    if layer_tmp.exists():
+        shutil.rmtree(layer_tmp)
+    layer_tmp.mkdir(parents=True)
+
+    override = layer.get("label_source_override")
+    raw_sources = [data_raw_root / s for s in (override or layer["fuente"])]
+    for s in raw_sources:
+        if not long_path(s).exists():
+            raise FileNotFoundError(f"Fuente no encontrada: {s}")
+    sources = [ensure_gdal_readable(s, layer_tmp) for s in raw_sources]
+
+    reproj_gpkg = layer_tmp / "reproj.gpkg"
+    if len(sources) == 1:
+        reproject_single(sources[0], reproj_gpkg)
+    else:
+        reproject_and_merge(sources, reproj_gpkg)
+
+    import geopandas as gpd
+
+    gdf = gpd.read_file(reproj_gpkg)
+    if label_field not in gdf.columns:
+        raise RuntimeError(
+            f"{layer_id}: el campo de etiqueta '{label_field}' no existe en "
+            f"el origen de puntos (columnas disponibles: {list(gdf.columns)})"
+        )
+
+    # sort_field (opcional): mismo campo que usa "symbol-sort-key" en
+    # src/js/main.js para decidir que nombre gana cuando varios compiten
+    # por el mismo hueco (p. ej. red hidrografica, muy densa) -- si no se
+    # lleva tambien a los puntos de etiqueta, esa priorizacion se pierde.
+    sort_field = layer.get("sort_field")
+    cols = [label_field] + ([sort_field] if sort_field else [])
+    if sort_field and sort_field not in gdf.columns:
+        raise RuntimeError(
+            f"{layer_id}: el campo de orden '{sort_field}' no existe en el "
+            f"origen (columnas disponibles: {list(gdf.columns)})"
+        )
+
+    if override:
+        # Ya son puntos (p. ej. el fichero de centroides oficial de ENP).
+        points = gpd.GeoDataFrame(gdf[cols + ["geometry"]].copy(), crs=gdf.crs)
+    else:
+        points = gdf[cols].copy()
+        points["geometry"] = gdf.geometry.representative_point()
+        points = gpd.GeoDataFrame(points, geometry="geometry", crs=gdf.crs)
+
+    points_gpkg = layer_tmp / "points.gpkg"
+    points.to_file(points_gpkg, driver="GPKG", layer="labels")
+
+    # Tope de zoom mas bajo que el de la capa principal: un punto no
+    # necesita mas detalle posicional al acercarse mas -- MapLibre
+    # sobre-escala (overzoom) la misma tesela de este maxzoom sin
+    # problema para simbolos de texto. Reduce mucho el tiempo de
+    # teselado (GDAL avisa de que z > 9 ya es lento) sin perder nada.
+    label_maxzoom = min(layer["maxzoom"], 12)
+
+    tiles_dir = layer_tmp / "tiles"
+    run(["ogr2ogr", "-f", "MVT", str(tiles_dir), str(points_gpkg),
+         "-dsco", f"MINZOOM={layer['minzoom']}",
+         "-dsco", f"MAXZOOM={label_maxzoom}",
+         "-dsco", f"NAME={layer_id}_labels",
+         "-dsco", f"DESCRIPTION=Puntos de etiqueta para {layer['nombre']}",
+         "-nln", "labels"])
+
+    n_tiles = sum(1 for _ in tiles_dir.rglob("*.pbf"))
+    print(f"  teselado: {n_tiles} archivos .pbf ({len(points)} puntos) - empaquetando a pmtiles...")
+
+    from pmtiles.convert import disk_to_pmtiles
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    out_path = output_dir / f"{layer_id}_labels.pmtiles"
+    disk_to_pmtiles(str(tiles_dir), str(out_path), maxzoom=label_maxzoom)
+
+    size_mb = out_path.stat().st_size / (1024 * 1024)
+    elapsed = time.time() - t0
+    print(f"  -> {out_path.name}: {size_mb:.1f} MB en {elapsed:.0f}s")
+
+    try:
+        shutil.rmtree(layer_tmp)
+    except OSError as e:
+        print(f"  (aviso: no se pudo limpiar {layer_tmp}: {e})")
+
+    return out_path, size_mb, elapsed
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--only", help="lista de ids separados por coma")
     parser.add_argument("--list", action="store_true")
+    parser.add_argument("--labels-only", action="store_true",
+                         help="generar solo <id>_labels.pmtiles (un punto por entidad) para las "
+                              "capas con label_field en config.yaml, sin re-teselar el poligono/linea")
     parser.add_argument("--single-layer", help=argparse.SUPPRESS)  # uso interno
+    parser.add_argument("--single-label-layer", help=argparse.SUPPRESS)  # uso interno
     args = parser.parse_args()
 
     cfg = load_config()
@@ -214,6 +327,17 @@ def main():
         build_layer(layer, cfg["data_raw_root"], cfg["output_dir"], tmp_dir)
         return
 
+    if args.single_label_layer:
+        layer = next((l for l in layers if l["id"] == args.single_label_layer), None)
+        if layer is None:
+            print(f"id desconocido: {args.single_label_layer}")
+            sys.exit(2)
+        build_label_points(layer, cfg["data_raw_root"], cfg["output_dir"], tmp_dir)
+        return
+
+    if args.labels_only:
+        layers = [l for l in layers if l.get("label_field")]
+
     if args.only:
         wanted = set(args.only.split(","))
         layers = [l for l in layers if l["id"] in wanted]
@@ -229,19 +353,22 @@ def main():
     # en vez de acumular memoria en un unico proceso Python de larga
     # duracion (lo que causo que el sistema matara el lote entero por falta
     # de memoria en un intento anterior).
+    single_flag = "--single-label-layer" if args.labels_only else "--single-layer"
+    suffix = "_labels" if args.labels_only else ""
+
     results = []
     errors = []
     for i, layer in enumerate(layers, 1):
-        print(f"\n[{i}/{len(layers)}] {layer['id']}")
+        print(f"\n[{i}/{len(layers)}] {layer['id']}{suffix}")
         t0 = time.time()
-        proc = subprocess.run([sys.executable, __file__, "--single-layer", layer["id"]])
+        proc = subprocess.run([sys.executable, __file__, single_flag, layer["id"]])
         elapsed = time.time() - t0
-        out_path = cfg["output_dir"] / f"{layer['id']}.pmtiles"
+        out_path = cfg["output_dir"] / f"{layer['id']}{suffix}.pmtiles"
         if proc.returncode == 0 and out_path.exists():
             size_mb = out_path.stat().st_size / (1024 * 1024)
-            results.append((layer["id"], size_mb, elapsed))
+            results.append((f"{layer['id']}{suffix}", size_mb, elapsed))
         else:
-            errors.append((layer["id"], f"exit code {proc.returncode}"))
+            errors.append((f"{layer['id']}{suffix}", f"exit code {proc.returncode}"))
 
     shutil.rmtree(tmp_dir, ignore_errors=True)
 
