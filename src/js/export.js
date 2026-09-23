@@ -30,6 +30,11 @@ const CAJETIN_HEIGHT_RATIO = 0.09;
 const SCREEN_MM_PER_CSS_PX = 25.4 / 96; // convencion estandar (96 DPI) para estimar la escala "de pantalla"
 const SCALE_OPTIONS = [500, 1000, 2000, 2500, 5000, 10000, 25000, 50000, 100000];
 
+// Debe coincidir con el "text-size" de las capas de etiqueta en main.js.
+// Solo se usa como referencia de respaldo en captureMapAtScale() si por
+// lo que sea el estilo no trae un valor numerico (p. ej. una expresion).
+const ON_SCREEN_LABEL_TEXT_SIZE = 11;
+
 function mmToPx(mm, dpi) {
   return Math.round((mm / MM_PER_IN) * dpi);
 }
@@ -114,6 +119,30 @@ async function captureMapAtScale(targetScaleN, mapW, mapH) {
   mapEl.style.height = `${mapH / dpr}px`;
   map.resize();
 
+  // Los nombres de elemento (rios, espacios protegidos...) los dibuja el
+  // propio MapLibre como "symbol" layers con text-size en px CSS (11,
+  // ver main.js) -- pensado para verse bien en una pantalla normal. Al
+  // exportar, el canvas se renderiza a EXPORT_DPI (200), mucho mas denso
+  // que una pantalla, asi que ese mismo texto queda diminuto en el papel
+  // si no se compensa. El resto de la cartografia (cajetin, leyenda,
+  // escala) ya usa px() para ir de mm a pixeles segun EXPORT_DPI: aqui se
+  // aplica la misma idea, tratando esos 11px como "pensados para 96 DPI"
+  // (la referencia de pantalla que ya usa SCREEN_MM_PER_CSS_PX) y
+  // escalandolos para que el texto ocupe el mismo tamano FISICO en el
+  // papel sea cual sea EXPORT_DPI o el devicePixelRatio del navegador.
+  const restoreTextSizes = [];
+  for (const l of LAYERS) {
+    if (!l.labelField) continue;
+    const id = `${l.id}-label`;
+    if (!map.getLayer(id)) continue;
+    const original = map.getLayoutProperty(id, "text-size");
+    restoreTextSizes.push([id, original]);
+    const onScreenPx = typeof original === "number" ? original : ON_SCREEN_LABEL_TEXT_SIZE;
+    const onScreenMm = onScreenPx * SCREEN_MM_PER_CSS_PX;
+    const exportPx = (onScreenMm / MM_PER_IN) * EXPORT_DPI / dpr;
+    map.setLayoutProperty(id, "text-size", exportPx);
+  }
+
   await new Promise((resolve) => {
     map.once("idle", resolve);
     // por si el mapa ya estaba "idle" y el evento no vuelve a disparar
@@ -137,6 +166,10 @@ async function captureMapAtScale(targetScaleN, mapW, mapH) {
   }
 
   const dataUrl = map.getCanvas().toDataURL("image/png");
+
+  for (const [id, original] of restoreTextSizes) {
+    map.setLayoutProperty(id, "text-size", original);
+  }
 
   mapEl.setAttribute("style", prevStyle);
   map.resize();

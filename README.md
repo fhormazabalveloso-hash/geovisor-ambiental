@@ -131,6 +131,23 @@ Este documento se centra en el **Componente 1**.
   a **ExcelJS** porque la version libre de SheetJS no escribe estilos
   (ver §9). (5) Push sigue en pausa hasta tener todo bien armado - sin
   fecha concreta todavía.
+- **(2026-09-23) Simulacro de licitación real y fix de etiquetas
+  pequeñas.** Se probó el flujo completo (subir → buffer → cruce → CSV →
+  Excel → cartografía) con un trazado curvo de ~45 km simulando un
+  acceso a zona portuaria cerca de Huelva - resultados coherentes y
+  nombres reales reconocibles (Marismas del Odiel, Acantilado del
+  Asperillo...), sin superar nunca el área del buffer. Francisco detectó
+  que los **nombres de elemento en la cartografía exportada salían
+  diminutos** - causa raíz: `text-size` de las capas de etiqueta
+  (`main.js`) está en píxeles CSS fijos (11), pensado para pantalla
+  normal, pero el canvas de exportación se renderiza a `EXPORT_DPI` (200,
+  más del doble de denso) - el resto de la cartografía (cajetín, leyenda,
+  escala) ya convertía mm→píxeles correctamente para esto, pero el texto
+  que dibuja el propio MapLibre no. Fix en `export.js`
+  (`captureMapAtScale`): antes de capturar, escala temporalmente el
+  `text-size` de cada capa de etiqueta para que el texto ocupe el mismo
+  tamaño físico en el papel (~2,9 mm) sea cual sea la escala elegida, y
+  lo restaura después. Verificado visualmente en el canvas exportado.
 
 ---
 
@@ -433,6 +450,13 @@ sigue saliendo de QGIS**; el visor acelera el paso previo (análisis + datos).
       (`fhormazabalveloso-hash`), confirmado 2026-09-21: todo el
       contenido del repo es información pública, no hace falta esperar a
       una cuenta/organización de empresa
+- [x] Tamaño de los nombres de elemento en la cartografía exportada
+      (2026-09-23, detectado por Francisco en un simulacro con un caso
+      parecido a una licitación real). El `text-size` fijo en px CSS
+      (11, pensado para pantalla) no se escalaba para `EXPORT_DPI` -
+      salía diminuto en el papel. `export.js` ahora lo ajusta
+      temporalmente antes de capturar para que ocupe un tamaño físico
+      constante (~2,9 mm) en cualquier escala de exportación.
 - [ ] (Después) Componente 2 - geovisor de proyectos desde MyMaps
 - [ ] (Después) Componente 3 - geovisor de arqueología (nuevo,
       2026-09-21, sin especificar todavía)
