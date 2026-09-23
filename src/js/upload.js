@@ -166,17 +166,122 @@ function removeUploadedLayer(id) {
   buildUploadPanel();
 }
 
+// --- Solapamiento entre buffers de varios tramos/puntos subidos (idea #9
+// de investigacion/ideas-mejora-geovisores-referencia.md) ---
+//
+// No modela impacto acumulativo real (eso exigiria conocer el tipo de
+// afeccion de cada proyecto, fuera de alcance de un cribado) -- solo
+// compara los buffers dos a dos y señala donde coinciden geometricamente,
+// que es justo el dato de partida que pide el apartado de "efectos
+// sinergicos y acumulativos" de casi cualquier EIA.
+let lastOverlapGeojson = { type: "FeatureCollection", features: [] };
+
+function addOverlapLayerToMap() {
+  if (map.getSource("upload-overlaps")) return;
+  map.addSource("upload-overlaps", { type: "geojson", data: lastOverlapGeojson });
+  map.addLayer({
+    id: "upload-overlaps-fill",
+    type: "fill",
+    source: "upload-overlaps",
+    paint: { "fill-color": "#D50000", "fill-opacity": 0.35 },
+  });
+  map.addLayer({
+    id: "upload-overlaps-line",
+    type: "line",
+    source: "upload-overlaps",
+    paint: { "line-color": "#D50000", "line-width": 2, "line-dasharray": [2, 1] },
+  });
+}
+
+// Igual que con las capas subidas: un cambio de mapa base reemplaza el
+// estilo entero y borra las fuentes/capas dinamicas.
+map.on("styledata", () => {
+  if (!map.getSource("upload-overlaps")) addOverlapLayerToMap();
+});
+
+// unifyBuffer() esta definida en analysis.js (cargado despues que este
+// fichero en index.html) pero solo se invoca aqui dentro de un manejador de
+// clic, mucho despues de que todos los <script> ya se hayan ejecutado -- el
+// mismo patron que ya usa este fichero para llamar a analyzeUploadedLayer.
+function computeUploadOverlaps() {
+  const withBuffer = uploadedLayers.filter(
+    (u) => u.bufferMeters > 0 && u.bufferGeojson && u.bufferGeojson.features.length > 0
+  );
+  const overlaps = [];
+  for (let i = 0; i < withBuffer.length; i++) {
+    for (let j = i + 1; j < withBuffer.length; j++) {
+      const a = unifyBuffer(withBuffer[i].bufferGeojson);
+      const b = unifyBuffer(withBuffer[j].bufferGeojson);
+      if (!a || !b) continue;
+      let inter;
+      try {
+        inter = turf.intersect(a, b);
+      } catch (e) {
+        continue;
+      }
+      if (!inter) continue;
+      const ha = turf.area(inter) / 10000;
+      if (ha <= 0) continue;
+      overlaps.push({ a: withBuffer[i], b: withBuffer[j], ha, geometry: inter });
+    }
+  }
+  return overlaps;
+}
+
+function showOverlapResults() {
+  const overlaps = computeUploadOverlaps();
+  addOverlapLayerToMap();
+  lastOverlapGeojson = {
+    type: "FeatureCollection",
+    features: overlaps.map((o) => ({
+      type: "Feature",
+      geometry: o.geometry.geometry,
+      properties: { a: o.a.name, b: o.b.name, ha: o.ha },
+    })),
+  };
+  if (map.getSource("upload-overlaps")) map.getSource("upload-overlaps").setData(lastOverlapGeojson);
+
+  const resultsEl = document.getElementById("upload-overlap-results");
+  if (!resultsEl) return;
+  resultsEl.hidden = false;
+  if (overlaps.length === 0) {
+    resultsEl.innerHTML = `<p class="analysis-empty">Sin solapamiento entre los buffers de los tramos/puntos subidos.</p>`;
+    return;
+  }
+  resultsEl.innerHTML = overlaps
+    .map(
+      (o) =>
+        `<p class="upload-overlap-row">⚠️ <strong>${o.a.name}</strong> × <strong>${o.b.name}</strong>: ${o.ha.toLocaleString("es-ES", { maximumFractionDigits: 2 })} ha solapadas</p>`
+    )
+    .join("");
+}
+
 function buildUploadPanel() {
   const panel = document.getElementById("upload-panel");
-  const empty = document.getElementById("upload-panel-empty");
 
   if (uploadedLayers.length === 0) {
-    panel.innerHTML = "";
-    panel.appendChild(empty);
+    // No se reutiliza el nodo #upload-panel-empty original: la primera vez
+    // que hay al menos un tramo, panel.innerHTML se reemplaza por completo
+    // mas abajo y ese nodo desaparece del documento -- reusarlo aqui
+    // (bug preexistente: document.getElementById devolvia null y
+    // appendChild(null) lanzaba TypeError la segunda vez que se llegaba a
+    // 0 tramos) rompia al quitar todos los tramos subidos.
+    panel.innerHTML = `<p id="upload-panel-empty">Sin tramos subidos todavía.</p>`;
+    if (map.getSource("upload-overlaps")) map.getSource("upload-overlaps").setData({ type: "FeatureCollection", features: [] });
     return;
   }
 
   let html = "";
+  if (uploadedLayers.length >= 2) {
+    html += `<div class="upload-overlap-section">
+      <button id="upload-overlap-btn" class="upload-overlap-btn">🔗 Ver solapamientos entre buffers</button>
+      <div id="upload-overlap-results" hidden></div>
+    </div>`;
+  } else if (map.getSource("upload-overlaps")) {
+    // Quedaba 1 tramo o menos (se borro uno): el resaltado de solapamiento
+    // en el mapa, si lo habia, ya no es valido -- se limpia.
+    map.getSource("upload-overlaps").setData({ type: "FeatureCollection", features: [] });
+  }
   for (const u of uploadedLayers) {
     const opacityPct = Math.round(u.opacity * 100);
     const bufferOptionsHtml = BUFFER_OPTIONS.map(
@@ -247,6 +352,8 @@ function buildUploadPanel() {
       if (u) analyzeUploadedLayer(u);
     });
   });
+  const overlapBtn = document.getElementById("upload-overlap-btn");
+  if (overlapBtn) overlapBtn.addEventListener("click", showOverlapResults);
 }
 
 function addUploadedLayer(name, geojson) {

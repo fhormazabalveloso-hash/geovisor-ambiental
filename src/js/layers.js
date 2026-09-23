@@ -17,6 +17,16 @@
 //        el nombre de un espacio Red Natura, un rio, una via pecuaria).
 //        null cuando la capa no trae un campo de nombre util -- verificado
 //        contra los campos reales de cada .pmtiles (pmtiles.reader).
+// fuente: organismo de origen del dato (tabla del README §5), mostrado como
+//        columna en el CSV/Excel de afecciones (analysis.js) para que la
+//        tabla exportada sea citable sin tener que ir a buscarlo aparte
+//        (idea #10 de investigacion/ideas-mejora-geovisores-referencia.md).
+// suggestedBufferM: buffer que aparece preseleccionado para esta capa en el
+//        analisis de afecciones (analysis.js), en vez del buffer general
+//        del tramo -- para criterios con una distancia reglamentaria propia
+//        (p.ej. zona de policia de cauces). El usuario puede cambiarlo por
+//        capa antes de analizar; si no esta definido, usa el buffer del
+//        tramo (idea #2 de investigacion/ideas-mejora-geovisores-referencia.md).
 //
 // Orden del array = orden de dibujo en el mapa (el ultimo elemento se
 // dibuja encima). Agrupado por tematica (para que coincida con el panel:
@@ -30,6 +40,7 @@ const LAYERS = [
   {
     id: "red_natura_2000",
     nombre: "Red Natura 2000 (ZEC + ZEPA)",
+    fuente: "MITECO / REDIAM",
     tematica: "espacios_protegidos",
     nivel: 1,
     sourceLayer: "reproj",
@@ -61,6 +72,7 @@ const LAYERS = [
   {
     id: "enp",
     nombre: "Espacios Naturales Protegidos (ENP)",
+    fuente: "MITECO / REDIAM",
     tematica: "espacios_protegidos",
     nivel: 1,
     sourceLayer: "Enp2025_p",
@@ -73,6 +85,7 @@ const LAYERS = [
   {
     id: "dph_deslindado",
     nombre: "DPH deslindado",
+    fuente: "CHG / confederaciones hidrográficas",
     tematica: "hidrografia",
     nivel: 1,
     sourceLayer: "DPH_DESLINDADO_20250319",
@@ -85,6 +98,7 @@ const LAYERS = [
   {
     id: "iezh",
     nombre: "Zonas Húmedas (IEZH)",
+    fuente: "MITECO",
     tematica: "hidrografia",
     nivel: 1,
     sourceLayer: "IEZH_P_2025",
@@ -97,6 +111,7 @@ const LAYERS = [
   {
     id: "red_hidrografica",
     nombre: "Red hidrográfica (Pfafstetter)",
+    fuente: "MITECO (Pfafstetter)",
     tematica: "hidrografia",
     nivel: 2,
     sourceLayer: "reproj",
@@ -105,11 +120,18 @@ const LAYERS = [
     labelField: "nom_rio",
     idField: "OBJECTID",
     sortField: "Shape_Leng", // prioriza tramos mas largos: red muy densa, mucha competencia por hueco
+    // Buffer sugerido en el analisis de afecciones (ver analysis.js): 100 m
+    // = zona de policia presunta (art. 6 RDPH) donde no hay DPH deslindado,
+    // ya documentado como criterio del proyecto en README §6. El usuario
+    // puede cambiarlo por capa antes de analizar -- esto es solo el valor
+    // que aparece preseleccionado.
+    suggestedBufferM: 100,
     visibleByDefault: false,
   },
   {
     id: "humedales_turberas",
     nombre: "Humedales y turberas",
+    fuente: "MITECO (complementario a IEZH, vigencia/validez por confirmar)",
     tematica: "hidrografia",
     nivel: 2,
     sourceLayer: "Humedal_TurberaBCAM2_2025",
@@ -127,6 +149,7 @@ const LAYERS = [
   {
     id: "vias_pecuarias",
     nombre: "Vías Pecuarias (RGVP)",
+    fuente: "MITECO / REDIAM",
     tematica: "patrimonio_natural",
     nivel: 1,
     sourceLayer: "RGVP_BDN_2024",
@@ -140,6 +163,7 @@ const LAYERS = [
   {
     id: "iba",
     nombre: "IBA - Áreas Importantes para las Aves",
+    fuente: "SEO/BirdLife",
     tematica: "contexto",
     nivel: 3,
     sourceLayer: "IBA España",
@@ -151,6 +175,7 @@ const LAYERS = [
   {
     id: "nucleos_urbanos",
     nombre: "Núcleos urbanos",
+    fuente: "CNIG",
     tematica: "contexto",
     nivel: 3,
     sourceLayer: "reproj",
@@ -162,6 +187,7 @@ const LAYERS = [
   {
     id: "limites_municipales",
     nombre: "Límites municipales",
+    fuente: "CNIG",
     tematica: "contexto",
     nivel: 3,
     sourceLayer: "reproj",
@@ -173,6 +199,7 @@ const LAYERS = [
   {
     id: "limites_provinciales",
     nombre: "Límites provinciales",
+    fuente: "CNIG",
     tematica: "contexto",
     nivel: 3,
     sourceLayer: "reproj",
@@ -184,6 +211,7 @@ const LAYERS = [
   {
     id: "limites_autonomicos",
     nombre: "Límites autonómicos",
+    fuente: "CNIG",
     tematica: "contexto",
     nivel: 3,
     sourceLayer: "reproj",

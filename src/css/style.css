@@ -207,6 +207,39 @@ html, body {
   cursor: default;
 }
 
+/* Solapamiento entre buffers de varios tramos/puntos -- idea #9 */
+.upload-overlap-section {
+  padding-bottom: 8px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid #eee;
+}
+
+.upload-overlap-btn {
+  display: block;
+  width: 100%;
+  padding: 5px 0;
+  font-size: 11.5px;
+  border: none;
+  border-radius: 4px;
+  background: #D50000;
+  color: #fff;
+  cursor: pointer;
+}
+
+.upload-overlap-btn:hover {
+  filter: brightness(1.1);
+}
+
+#upload-overlap-results {
+  margin-top: 6px;
+}
+
+.upload-overlap-row {
+  font-size: 11.5px;
+  color: #555;
+  margin: 3px 0;
+}
+
 /* --- Modal de analisis de afecciones --- */
 #analysis-modal-backdrop {
   position: fixed;
@@ -287,6 +320,58 @@ html, body {
   color: #888;
   font-size: 12.5px;
   padding: 8px 0;
+}
+
+/* Buffer por capa antes de (re)calcular -- idea #2, ver analysis.js */
+.analysis-buffer-controls {
+  background: #f7f7f9;
+  border: 1px solid #eee;
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+}
+
+.analysis-buffer-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 16px;
+  margin: 6px 0 10px;
+}
+
+.analysis-buffer-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.analysis-buffer-layer-name {
+  flex: 1;
+  color: #333;
+}
+
+.analysis-buffer-select,
+.analysis-field-status {
+  font-size: 11.5px;
+  padding: 2px 4px;
+}
+
+#analysis-recalc-btn {
+  font-size: 12.5px;
+  padding: 5px 10px;
+}
+
+/* "Cerca, sin cruce directo" -- idea #4 */
+.analysis-near-title {
+  font-size: 11.5px;
+  color: #888;
+  font-style: italic;
+  margin: 8px 0 4px;
+}
+
+.analysis-table-near td,
+.analysis-table-near th {
+  color: #777;
 }
 
 #analysis-overlay {

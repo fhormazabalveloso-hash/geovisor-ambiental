@@ -203,6 +203,58 @@ Este documento se centra en el **Componente 1**.
   `config.yaml` (capa de Nivel 3/contexto, menos visible durante las
   pruebas) - detectado por un 404 en la consola del navegador y
   corregido aparte.
+- **(2026-09-23) Investigación de geovisores de referencia + 5 mejoras
+  del análisis de afecciones.** A petición de Francisco, dos agentes en
+  paralelo investigaron (1) nombres posibles para el proyecto (guardado
+  en `investigacion/propuesta-nombre-geovisor.md`, **nunca entra a
+  Git** - misma razón que el `.docx`) y (2) geovisores de referencia
+  (MITECO, MAGIC, IPaC, South Africa Screening Tool, AERIUS...) y
+  literatura académica sobre cribado ambiental de infraestructura
+  lineal, con 10 ideas priorizadas (`investigacion/ideas-mejora-
+  geovisores-referencia.md`, tampoco entra a Git). Tras revisarlas
+  juntos, se implementaron las 5 de menor/medio esfuerzo (el semáforo
+  de sensibilidad, la más ambiciosa, se deja para el final):
+  - **Fuente por capa en la exportación** (idea #10): cada capa declara
+    su organismo de origen (`fuente` en `layers.js`, tabla del README
+    §5) y aparece como columna en el CSV/Excel de afecciones, más una
+    nota en la hoja "Info" sobre vigencia del catálogo.
+  - **Verificación en campo** (idea #6): columna "Confirmado en campo"
+    (Sin confirmar / Confirmado / Descartado) editable por hallazgo en
+    el modal de resultados, exportada también al CSV/Excel. El estado
+    vive en `u.fieldStatus` (por tramo subido), no en el resultado, para
+    sobrevivir a un recálculo con otro buffer.
+  - **Distancia al elemento más cercano cuando no hay cruce** (idea #4):
+    antes, `analysis.js` descartaba en silencio (`turf.booleanIntersects`)
+    todo lo que no cruzaba el buffer. Ahora, para una capa sin cruce
+    directo, se busca el elemento renderizado más cercano dentro de un
+    margen de 2 km más allá del buffer (`NEAREST_SEARCH_MARGIN_M`) y se
+    reporta su distancia aproximada, muestreando el trazado cada 100 m
+    (`sampleTrazadoPoints`/`minDistanceMetersToFeature`, vía
+    `turf.pointToLineDistance`/`turf.polygonToLine`). El mapa se
+    encuadra a esa zona ampliada antes de consultar, porque MapLibre
+    solo tiene datos consultables para lo que está renderizado.
+  - **Buffer configurable por capa** (idea #2): antes había un único
+    `bufferMeters` global por tramo, aplicado igual a las 7 capas del
+    cruce. Ahora el modal de resultados muestra un selector de buffer
+    por capa (override > `l.suggestedBufferM` en `layers.js` > buffer
+    del tramo) con un botón "Recalcular". De fábrica, `red_hidrografica`
+    sugiere 100 m (zona de policía presunta art. 6 RDPH, ya
+    documentada en README §6) - el resto usa el buffer del tramo salvo
+    que el usuario lo cambie.
+  - **Solapamiento entre tramos propios** (idea #9): con 2+ tramos/
+    puntos subidos con buffer, un botón "Ver solapamientos entre
+    buffers" en el panel calcula la intersección dos a dos
+    (`turf.intersect`) y resalta el área en rojo sobre el mapa, con el
+    total en hectáreas por par - insumo directo para el apartado de
+    "efectos sinérgicos y acumulativos" de una EIA.
+  - **Bug encontrado de paso (no en el alcance pedido):** al probar el
+    flujo de quitar todos los tramos subidos, `buildUploadPanel()`
+    lanzaba `TypeError` (`appendChild(null)`) - el nodo original
+    `#upload-panel-empty` del HTML se destruye la primera vez que se
+    sube algo (`panel.innerHTML` se reemplaza entero), así que
+    `document.getElementById` ya no lo encontraba la segunda vez que se
+    volvía a 0 tramos. Corregido en `upload.js` reconstruyendo ese
+    mensaje como texto fijo en vez de reutilizar el nodo original.
 
 ---
 
@@ -547,6 +599,19 @@ sigue saliendo de QGIS**; el visor acelera el paso previo (análisis + datos).
       el detalle completo). Verificado en las 7 capas con `labelField`:
       `red_natura_2000`, `enp`, `vias_pecuarias`, `dph_deslindado`,
       `iezh`, `red_hidrografica`, `iba`.
+- [x] 5 mejoras del análisis de afecciones a partir de la investigación
+      de geovisores de referencia (2026-09-23, ver §2 y
+      `investigacion/ideas-mejora-geovisores-referencia.md`): fuente por
+      capa en el export, checklist de verificación en campo, distancia
+      al elemento más cercano cuando no hay cruce directo, buffer
+      configurable por capa (con 100 m sugerido para la red
+      hidrográfica), y detección de solapamiento entre varios tramos
+      propios subidos.
+- [ ] Semáforo de sensibilidad (Alta/Media/Baja) por hallazgo - la idea
+      de mayor impacto del informe de investigación (idea #1), dejada
+      para el final a propósito (2026-09-23). Pendiente definir el
+      criterio de clasificación antes de implementar (ver nota en
+      `investigacion/ideas-mejora-geovisores-referencia.md`).
 - [ ] (Después) Componente 2 - geovisor de proyectos desde MyMaps
 - [ ] (Después) Componente 3 - geovisor de arqueología (nuevo,
       2026-09-21, sin especificar todavía)
