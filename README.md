@@ -312,6 +312,25 @@ Este documento se centra en el **Componente 1**.
   solapan físicamente (queda todo del mismo tono, sin distinguir
   colores) - ver el documento del caso de prueba para el detalle
   completo.
+- **(2026-09-24) Segundo caso de prueba (carretera) - fix reverificado +
+  nombres/leyenda confirmados.** A petición de Francisco de probar "otro
+  ejemplo más realista" con nombres visibles en la cartografía, se probó
+  una variante de carretera (línea, 2,5 km) cruzando el deslinde oficial
+  de DPH del Río Manzanares (caso completo en
+  `investigacion/ejemplos-de-uso/caso-carretera-cruce-rio.md`, fuera de
+  Git). Confirmado con datos reales: (1) el fix del punto anterior se
+  sostiene con geometría de línea, no solo polígono; (2) los nombres de
+  elemento SÍ aparecen como texto en el plano exportado cuando el punto
+  de etiqueta de la entidad cae dentro del recuadro (mucho más probable
+  en un proyecto lineal de varios km que en un cerramiento puntual -
+  documentado como limitación esperada, no bug, en el caso anterior);
+  (3) la leyenda exportada solo lista las capas con elementos de verdad
+  en esa vista, no todo lo que esté marcado en el panel. De paso se
+  investigó y descartó otro falso bug (la escala de exportación parecía
+  "pegada" al reencuadrar - era el render en pausa del propio entorno de
+  pruebas, no la aplicación) y se regeneraron las capturas del primer
+  caso que habían desaparecido de la carpeta entre sesiones (posible
+  sincronización de OneDrive - ver nota en ese mismo documento).
 
 ---
 
