@@ -255,6 +255,34 @@ Este documento se centra en el **Componente 1**.
     `document.getElementById` ya no lo encontraba la segunda vez que se
     volvía a 0 tramos. Corregido en `upload.js` reconstruyendo ese
     mensaje como texto fijo en vez de reutilizar el nodo original.
+- **(2026-09-24) Semáforo de sensibilidad (idea #1, la que se dejó para
+  el final el día anterior).** Antes de implementar, se investigó cómo
+  funciona realmente la herramienta de referencia (South Africa
+  National Web-Based Environmental Screening Tool, obligatoria desde
+  2019): **no calcula la sensibilidad en vivo a partir de la geometría
+  del proyecto** - cruza el sitio contra un mapa nacional
+  **pre-clasificado por ecólogos** (Critical Biodiversity Areas /
+  Ecological Support Areas de SANBI, con planificación de conservación
+  sistemática), y reporta un nivel **por tema/capa por separado**, no
+  un único score agregado para todo el proyecto. Esto descartó la idea
+  de calcular la sensibilidad a partir de hectáreas/metros cruzados
+  (precisión falsa que ni la propia herramienta de referencia usa) y
+  confirmó que un valor fijo por capa - coherente con que la tabla de
+  resultados ya es una fila por capa - es la aproximación más honesta
+  con los datos disponibles. Implementado:
+  - `sensitivityBase` en `layers.js` (Alta/Media, propuesta de
+    Quadrante para las 7 capas del cruce, **no una clasificación
+    reglamentaria** - documentado así en el propio código y en el
+    Excel exportado).
+  - Dos matices calculados en `analysis.js` (`computeSensitivity`), sin
+    datos nuevos: un hallazgo "cerca, sin cruce directo" (idea #4) baja
+    un escalón; un cruce de Red Natura 2000 con `TIPO=C` (ZEC+ZEPA a la
+    vez) sube un escalón - verificado con el caso de prueba de Doñana
+    (queda en "Muy Alta").
+  - Badge de color (Muy Alta=rojo, Alta=naranja, Media=amarillo,
+    Baja=verde) como primera columna en el modal de resultados y en el
+    Excel exportado (con su propio color de fondo por fila, igual que
+    la columna Color de capa).
 
 ---
 
@@ -607,11 +635,16 @@ sigue saliendo de QGIS**; el visor acelera el paso previo (análisis + datos).
       configurable por capa (con 100 m sugerido para la red
       hidrográfica), y detección de solapamiento entre varios tramos
       propios subidos.
-- [ ] Semáforo de sensibilidad (Alta/Media/Baja) por hallazgo - la idea
-      de mayor impacto del informe de investigación (idea #1), dejada
-      para el final a propósito (2026-09-23). Pendiente definir el
-      criterio de clasificación antes de implementar (ver nota en
-      `investigacion/ideas-mejora-geovisores-referencia.md`).
+- [x] Semáforo de sensibilidad (Muy Alta/Alta/Media/Baja) por hallazgo
+      (2026-09-24, idea #1). Investigado primero cómo lo hace la
+      herramienta de referencia (South Africa Screening Tool: mapa
+      pre-clasificado por ecólogos, sensibilidad por tema, no una
+      fórmula a partir de la geometría del proyecto) - ver §2. Valor
+      base por capa en `layers.js` (`sensitivityBase`, propuesta de
+      Quadrante, no reglamentaria) con dos matices calculados en
+      `analysis.js` (cercanía sin cruce baja un escalón; Red Natura
+      2000 con ZEC+ZEPA sube uno), mostrado como badge de color en el
+      modal de resultados y en el Excel exportado.
 - [ ] (Después) Componente 2 - geovisor de proyectos desde MyMaps
 - [ ] (Después) Componente 3 - geovisor de arqueología (nuevo,
       2026-09-21, sin especificar todavía)

@@ -27,6 +27,29 @@
 //        (p.ej. zona de policia de cauces). El usuario puede cambiarlo por
 //        capa antes de analizar; si no esta definido, usa el buffer del
 //        tramo (idea #2 de investigacion/ideas-mejora-geovisores-referencia.md).
+// sensitivityBase: nivel de sensibilidad (ver SENSITIVITY_LEVELS mas abajo)
+//        que se muestra por defecto para un hallazgo de esta capa en el
+//        analisis de afecciones -- semaforo de sensibilidad (idea #1 de
+//        investigacion/ideas-mejora-geovisores-referencia.md). Investigado
+//        (2026-09-24) como funciona realmente la herramienta de referencia
+//        (South Africa National Web-Based Environmental Screening Tool):
+//        NO calcula la sensibilidad en vivo a partir de la geometria del
+//        proyecto -- cruza el sitio contra un mapa nacional PRE-clasificado
+//        por ecologos (Critical Biodiversity Areas / Ecological Support
+//        Areas de SANBI), y reporta un nivel POR TEMA/CAPA, no un unico
+//        score agregado para todo el proyecto. Aqui no tenemos ese mapa de
+//        sensibilidad independiente, asi que la mejor aproximacion honesta
+//        es un valor fijo por capa (no calculado a partir de hectareas/
+//        metros cruzados -- eso seria precision falsa que ni la propia
+//        herramienta de referencia usa). ES UNA PROPUESTA DE QUADRANTE, no
+//        una clasificacion reglamentaria -- ajustar el criterio ambiental
+//        real corresponde a Francisco/el equipo, no a este codigo. Dos
+//        matices SI se calculan en analysis.js a partir de datos que ya
+//        tenemos (ver computeSensitivity): (a) un hallazgo "cerca, sin
+//        cruce directo" (idea #4) baja un escalon desde este valor base;
+//        (b) en red_natura_2000, un cruce con TIPO=C (ZEC+ZEPA a la vez)
+//        sube un escalon (doble designacion = valores combinados mas
+//        amplios).
 //
 // Orden del array = orden de dibujo en el mapa (el ultimo elemento se
 // dibuja encima). Agrupado por tematica (para que coincida con el panel:
@@ -67,12 +90,14 @@ const LAYERS = [
     },
     labelField: "SITE_NAME",
     idField: "site_code", // ver analysis.js: agrupa fragmentos de la misma entidad
+    sensitivityBase: "Alta", // sube a "Muy Alta" si TIPO=C (ver nota junto a sensitivityBase mas arriba)
     visibleByDefault: false,
   },
   {
     id: "enp",
     nombre: "Espacios Naturales Protegidos (ENP)",
     fuente: "MITECO / REDIAM",
+    sensitivityBase: "Alta",
     tematica: "espacios_protegidos",
     nivel: 1,
     sourceLayer: "Enp2025_p",
@@ -86,6 +111,7 @@ const LAYERS = [
     id: "dph_deslindado",
     nombre: "DPH deslindado",
     fuente: "CHG / confederaciones hidrográficas",
+    sensitivityBase: "Media", // vinculante (Nivel 1), pero es un criterio hidrologico/dominio publico, no biodiversidad directa
     tematica: "hidrografia",
     nivel: 1,
     sourceLayer: "DPH_DESLINDADO_20250319",
@@ -99,6 +125,7 @@ const LAYERS = [
     id: "iezh",
     nombre: "Zonas Húmedas (IEZH)",
     fuente: "MITECO",
+    sensitivityBase: "Alta",
     tematica: "hidrografia",
     nivel: 1,
     sourceLayer: "IEZH_P_2025",
@@ -112,6 +139,7 @@ const LAYERS = [
     id: "red_hidrografica",
     nombre: "Red hidrográfica (Pfafstetter)",
     fuente: "MITECO (Pfafstetter)",
+    sensitivityBase: "Media", // ya es Nivel 2/estimado en el proyecto
     tematica: "hidrografia",
     nivel: 2,
     sourceLayer: "reproj",
@@ -132,6 +160,7 @@ const LAYERS = [
     id: "humedales_turberas",
     nombre: "Humedales y turberas",
     fuente: "MITECO (complementario a IEZH, vigencia/validez por confirmar)",
+    sensitivityBase: "Media", // la propia fuente ya la marca como de validez por confirmar -- no le damos "Alta" con un dato que dudamos nosotros mismos
     tematica: "hidrografia",
     nivel: 2,
     sourceLayer: "Humedal_TurberaBCAM2_2025",
@@ -150,6 +179,7 @@ const LAYERS = [
     id: "vias_pecuarias",
     nombre: "Vías Pecuarias (RGVP)",
     fuente: "MITECO / REDIAM",
+    sensitivityBase: "Media", // proteccion real, pero de otra naturaleza (servidumbre de paso/patrimonio) que la de un habitat
     tematica: "patrimonio_natural",
     nivel: 1,
     sourceLayer: "RGVP_BDN_2024",
@@ -221,6 +251,18 @@ const LAYERS = [
     visibleByDefault: false,
   },
 ];
+
+// Semaforo de sensibilidad (idea #1, ver nota junto a sensitivityBase mas
+// arriba) -- de menor a mayor, para poder comparar/subir-bajar un escalon
+// por indice en computeSensitivity (analysis.js).
+const SENSITIVITY_LEVELS = ["Baja", "Media", "Alta", "Muy Alta"];
+
+const SENSITIVITY_COLOR = {
+  "Baja": "#2E7D32", // verde
+  "Media": "#F9A825", // amarillo/ambar
+  "Alta": "#EF6C00", // naranja
+  "Muy Alta": "#C62828", // rojo
+};
 
 const NIVEL_LABEL = {
   1: "Nivel 1 - Afección plena",

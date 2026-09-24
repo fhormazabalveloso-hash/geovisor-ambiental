@@ -225,6 +225,29 @@ function minDistanceMetersToFeature(samplePoints, feature) {
   return min * 1000;
 }
 
+// Semaforo de sensibilidad (idea #1) -- parte de layer.sensitivityBase
+// (propuesta de Quadrante, no reglamentaria, ver nota junto al campo en
+// layers.js) y aplica como mucho UN escalon de ajuste, nunca una formula a
+// partir de hectareas/metros cruzados: la herramienta de referencia
+// (South Africa Screening Tool) tampoco calcula asi la sensibilidad,
+// cruza el sitio contra un mapa ya clasificado por ecologos. Los dos
+// ajustes que SI hacemos usan datos que ya calculamos en este mismo
+// analisis, no datos nuevos inventados.
+function computeSensitivity(layer, { count, nearestM, hasTipoC }) {
+  const base = layer.sensitivityBase || "Media";
+  let idx = SENSITIVITY_LEVELS.indexOf(base);
+  if (idx === -1) idx = SENSITIVITY_LEVELS.indexOf("Media");
+  if (count === 0 && nearestM != null) {
+    // "Cerca, sin cruce directo" (idea #4): un escalon menos, no es una
+    // afeccion confirmada todavia.
+    idx = Math.max(0, idx - 1);
+  } else if (hasTipoC) {
+    // Red Natura 2000 con ZEC+ZEPA a la vez: un escalon mas.
+    idx = Math.min(SENSITIVITY_LEVELS.length - 1, idx + 1);
+  }
+  return SENSITIVITY_LEVELS[idx];
+}
+
 // overrides: { layerId: metros } -- buffer explicito elegido por el usuario
 // para esa capa en el panel de resultados (idea #2), vacio en el primer
 // analisis de un tramo.
@@ -301,9 +324,18 @@ async function analyzeUploadedLayer(u, overrides = {}) {
       let nearestM = null;
       let nearestName = null;
 
+      // Para el semaforo de sensibilidad (idea #1): un cruce con Red Natura
+      // 2000 TIPO=C (ZEC+ZEPA a la vez) sube un escalon la sensibilidad
+      // base de la capa -- ver nota junto a sensitivityBase en layers.js.
+      let hasTipoC = false;
+
       if (existing.length) {
         const feats = map.queryRenderedFeatures(undefined, { layers: existing });
         const intersecting = feats.filter((f) => f.geometry && turf.booleanIntersects(f, bufferPolygon));
+
+        if (l.id === "red_natura_2000") {
+          hasTipoC = intersecting.some((f) => f.properties.TIPO === "C");
+        }
 
         const addName = (f) => {
           if (!nameField) return;
@@ -379,7 +411,8 @@ async function analyzeUploadedLayer(u, overrides = {}) {
           }
         }
       }
-      results.push({ layer: l, count, totalHa, totalM, names: [...names].sort(), nearestM, nearestName, bufferM: layerBufferM });
+      const sensitivity = computeSensitivity(l, { count, nearestM, hasTipoC });
+      results.push({ layer: l, count, totalHa, totalM, names: [...names].sort(), nearestM, nearestName, bufferM: layerBufferM, sensitivity });
     }
 
     for (const l of targetLayers) {
@@ -410,6 +443,13 @@ function fieldStatusSelectHtml(u, layerId) {
     (opt) => `<option value="${escapeHtml(opt)}" ${opt === current ? "selected" : ""}>${escapeHtml(opt)}</option>`
   ).join("");
   return `<select class="analysis-field-status" data-layer-id="${layerId}">${optionsHtml}</select>`;
+}
+
+// Badge de color del semaforo de sensibilidad (idea #1) -- mismo patron
+// visual que .nivel-badge en el panel de capas (main.js/style.css).
+function sensitivityBadgeHtml(level) {
+  const color = SENSITIVITY_COLOR[level] || SENSITIVITY_COLOR["Media"];
+  return `<span class="sensitivity-badge" style="background:${color}">${escapeHtml(level)}</span>`;
 }
 
 function showAnalysisResults(u, results) {
@@ -449,12 +489,13 @@ function showAnalysisResults(u, results) {
       html += `<p class="analysis-empty">Sin afecciones detectadas en este nivel.</p>`;
     } else {
       html += `<table class="analysis-table"><thead><tr>
-        <th>Capa</th><th>Elementos</th><th>Nombres / códigos</th><th>Long. afectada (m)</th><th>Superficie afectada (ha)</th><th>Confirmado en campo</th>
+        <th>Sensibilidad</th><th>Capa</th><th>Elementos</th><th>Nombres / códigos</th><th>Long. afectada (m)</th><th>Superficie afectada (ha)</th><th>Confirmado en campo</th>
       </tr></thead><tbody>`;
       for (const r of afectadas) {
         const nombres = r.names.length ? escapeHtml(r.names.join(", ")) : "-";
         const ha = r.totalHa > 0 ? r.totalHa.toLocaleString("es-ES", { maximumFractionDigits: 2 }) : "-";
         html += `<tr>
+          <td>${sensitivityBadgeHtml(r.sensitivity)}</td>
           <td>${escapeHtml(r.layer.nombre)}</td>
           <td class="num">${r.count}</td>
           <td class="names">${nombres}</td>
@@ -468,10 +509,11 @@ function showAnalysisResults(u, results) {
     if (cercanas.length > 0) {
       html += `<p class="analysis-near-title">Cerca, sin cruce directo (hasta ${(NEAREST_SEARCH_MARGIN_M / 1000).toLocaleString("es-ES")} km más allá del buffer aplicado):</p>`;
       html += `<table class="analysis-table analysis-table-near"><thead><tr>
-        <th>Capa</th><th>Elemento más cercano</th><th>Distancia (m)</th><th>Confirmado en campo</th>
+        <th>Sensibilidad</th><th>Capa</th><th>Elemento más cercano</th><th>Distancia (m)</th><th>Confirmado en campo</th>
       </tr></thead><tbody>`;
       for (const r of cercanas) {
         html += `<tr>
+          <td>${sensitivityBadgeHtml(r.sensitivity)}</td>
           <td>${escapeHtml(r.layer.nombre)}</td>
           <td class="names">${r.nearestName ? escapeHtml(r.nearestName) : "-"}</td>
           <td class="num">${Math.round(r.nearestM).toLocaleString("es-ES")}</td>
@@ -511,7 +553,7 @@ document.getElementById("analysis-close-btn").addEventListener("click", () => {
 });
 
 const RESULTS_HEADER = [
-  "Nivel", "Capa", "Fuente", "Buffer aplicado (m)", "Elementos", "Nombres/códigos",
+  "Sensibilidad", "Nivel", "Capa", "Fuente", "Buffer aplicado (m)", "Elementos", "Nombres/códigos",
   "Longitud afectada (m)", "Superficie afectada (ha)", "Distancia al más cercano (m)",
   "Confirmado en campo",
 ];
@@ -527,6 +569,7 @@ function resultsToRows(u, results) {
   for (const r of results) {
     if (r.count === 0 && r.nearestM == null) continue;
     rows.push([
+      r.sensitivity,
       r.layer.nivel,
       r.layer.nombre,
       r.layer.fuente || "",
@@ -583,13 +626,14 @@ document.getElementById("analysis-download-xlsx").addEventListener("click", asyn
 
   // Color como columna aparte (idea #10: capa + fuente citables sin salir
   // del Excel) -- Buffer/Distancia/Confirmado en campo son las nuevas
-  // columnas de las ideas #2/#4/#6 del informe de investigacion.
+  // columnas de las ideas #2/#4/#6 del informe de investigacion. La
+  // Sensibilidad (idea #1) va primero, es lo primero que hay que mirar.
   const header = [
-    "Nivel", "Capa", "Color", "Fuente", "Buffer aplicado (m)", "Elementos", "Nombres/códigos",
+    "Sensibilidad", "Nivel", "Capa", "Color", "Fuente", "Buffer aplicado (m)", "Elementos", "Nombres/códigos",
     "Longitud afectada (m)", "Superficie afectada (ha)", "Distancia al más cercano (m)", "Confirmado en campo",
   ];
-  const tableRows = rows.map(([nivel, capa, fuente, bufferM, count, nombres, m, ha, dist, estado]) => [
-    nivel, capa, "", fuente, bufferM, count, nombres, m, ha, dist, estado,
+  const tableRows = rows.map(([sensibilidad, nivel, capa, fuente, bufferM, count, nombres, m, ha, dist, estado]) => [
+    sensibilidad, nivel, capa, "", fuente, bufferM, count, nombres, m, ha, dist, estado,
   ]);
 
   const workbook = new ExcelJS.Workbook();
@@ -607,7 +651,7 @@ document.getElementById("analysis-download-xlsx").addEventListener("click", asyn
     rows: tableRows,
   });
 
-  [6, 34, 4, 24, 12, 10, 45, 16, 16, 16, 20].forEach((w, i) => {
+  [14, 6, 34, 4, 24, 12, 10, 45, 16, 16, 16, 20].forEach((w, i) => {
     sheet.getColumn(i + 1).width = w;
   });
 
@@ -619,11 +663,17 @@ document.getElementById("analysis-download-xlsx").addEventListener("click", asyn
   exportable.forEach((r, i) => {
     const row = sheet.getRow(i + 2);
     const layerColor = "FF" + r.layer.color.fill.replace("#", "");
+    const sensColor = "FF" + (SENSITIVITY_COLOR[r.sensitivity] || SENSITIVITY_COLOR["Media"]).replace("#", "");
     const band = i % 2 === 1 ? XLSX_BAND_FILL : "FFFFFFFF";
     for (let c = 1; c <= header.length; c++) {
-      row.getCell(c).fill = { type: "pattern", pattern: "solid", fgColor: { argb: c === 3 ? layerColor : band } };
+      row.getCell(c).fill = { type: "pattern", pattern: "solid", fgColor: { argb: c === 4 ? layerColor : band } };
     }
-    row.getCell(7).alignment = { wrapText: true, vertical: "top" };
+    // Sensibilidad (col. 1) con su propio color de semaforo, texto blanco
+    // en negrita para que se lea de un vistazo -- mismo criterio que la
+    // columna Color (capa).
+    row.getCell(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: sensColor } };
+    row.getCell(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
+    row.getCell(8).alignment = { wrapText: true, vertical: "top" };
     // Fila "cerca, sin cruce directo" (Elementos=0 con distancia): en
     // cursiva para distinguirla de un cruce real de un vistazo.
     if (r.count === 0 && r.nearestM != null) {
@@ -642,6 +692,7 @@ document.getElementById("analysis-download-xlsx").addEventListener("click", asyn
     ["Buffer aplicado", bufferLabel(u.bufferMeters) + " (por defecto -- ver columna 'Buffer aplicado (m)' de la tabla, algunas capas pueden usar uno distinto)"],
     ["Nota", "Estimación de cribado a partir de teselas vectoriales -- no sustituye el análisis en QGIS. Ver README del proyecto."],
     ["Fuente y vigencia", "Cada capa indica su organismo de origen en la columna 'Fuente'. El catálogo se descarga periódicamente del origen oficial (MITECO/IGN/REDIAM/CNIG según capa) -- confirmar la fecha de descarga vigente con el equipo antes de una entrega final."],
+    ["Sensibilidad", "Criterio interno de Quadrante (Muy Alta/Alta/Media/Baja), no una clasificación reglamentaria -- pensado para priorizar qué hallazgo revisar primero, no sustituye el criterio del técnico ambiental."],
   ]);
 
   const buf = await workbook.xlsx.writeBuffer();
