@@ -415,11 +415,36 @@ async function analyzeUploadedLayer(u, overrides = {}) {
       results.push({ layer: l, count, totalHa, totalM, names: [...names].sort(), nearestM, nearestName, bufferM: layerBufferM, sensitivity });
     }
 
+    // Las capas se hicieron temporalmente visibles mas arriba solo para
+    // poder consultarlas -- SIN este paso, una capa con afeccion real
+    // (count > 0) se volvia a ocultar igual que las demas al terminar, y
+    // "Exportar cartografia" (que solo pinta/lista lo que esta marcado en
+    // el panel, ver export.js) podia acabar mostrando un plano incompleto
+    // aunque la tabla de resultados dijera lo contrario -- encontrado
+    // probando un caso real de cerramiento (ver
+    // investigacion/ejemplos-de-uso/caso-cerramiento-planta-agroindustrial.md
+    // §4.1). Fix: una capa con cruce directo confirmado se queda activada;
+    // el resto (sin afeccion, o solo "cerca, sin cruce") vuelve a su
+    // estado previo, para no llenar el mapa de capas irrelevantes.
+    const autoActivated = [];
     for (const l of targetLayers) {
-      if (layerVisible[l.id] !== prevVisible[l.id]) setLayerVisible(l, prevVisible[l.id]);
+      const r = results.find((row) => row.layer.id === l.id);
+      const keepVisible = r && r.count > 0;
+      if (keepVisible) {
+        if (!prevVisible[l.id]) autoActivated.push(l);
+      } else if (layerVisible[l.id] !== prevVisible[l.id]) {
+        setLayerVisible(l, prevVisible[l.id]);
+      }
     }
+    // Reconstruye el panel para que las casillas reales reflejen el nuevo
+    // estado -- "Exportar cartografia" lee el checkbox del DOM, no solo
+    // layerVisible (ver buildLegendRows en export.js), asi que sin este
+    // paso las capas quedarian visibles en el mapa pero la casilla seguiria
+    // sin marcar y el problema original seguiria ahi a medias.
+    buildLayerPanel();
 
     u.layerBufferOverrides = overrides;
+    u.autoActivatedLayers = autoActivated;
     showAnalysisResults(u, results);
   } catch (e) {
     console.error(e);
@@ -457,6 +482,17 @@ function showAnalysisResults(u, results) {
     `${u.name} · buffer de ${bufferLabel(u.bufferMeters)} · estimación de cribado, no sustituye el análisis en QGIS`;
 
   const container = document.getElementById("analysis-results");
+
+  // Aviso de transparencia: que capas se acaban de activar en el panel
+  // porque tuvieron cruce directo (ver el bloque "autoActivated" en
+  // analyzeUploadedLayer) -- para que no sea una sorpresa silenciosa que
+  // aparezcan casillas marcadas solas, y para dejar claro que asi la
+  // cartografia exportada ahora si va a incluirlas.
+  let autoActivatedHtml = "";
+  if (u.autoActivatedLayers && u.autoActivatedLayers.length > 0) {
+    const nombres = u.autoActivatedLayers.map((l) => escapeHtml(l.nombre)).join(", ");
+    autoActivatedHtml = `<p class="modal-note analysis-autoactivated-note">✅ Se han activado en el mapa (panel de capas) las que tienen cruce directo y no estaban ya marcadas: ${nombres} -- así la cartografía que exportes las va a incluir. Desactívalas a mano si no las quieres en el plano.</p>`;
+  }
 
   // Buffer por capa (idea #2): por defecto el del tramo, salvo que la
   // propia capa traiga un valor sugerido (l.suggestedBufferM en layers.js)
@@ -524,7 +560,7 @@ function showAnalysisResults(u, results) {
     }
     html += `</div>`;
   }
-  container.innerHTML = controlsHtml + html;
+  container.innerHTML = autoActivatedHtml + controlsHtml + html;
 
   container.querySelectorAll(".analysis-field-status").forEach((sel) => {
     sel.addEventListener("change", () => {

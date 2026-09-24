@@ -749,6 +749,17 @@ html, body {
   margin: 4px 0 16px;
 }
 
+/* Aviso de capas activadas automaticamente tras el analisis -- ver
+   analyzeUploadedLayer/showAnalysisResults en analysis.js */
+.analysis-autoactivated-note {
+  background: #E8F5E9;
+  border: 1px solid #A5D6A7;
+  border-radius: 4px;
+  color: #2E7D32;
+  padding: 6px 10px;
+  margin: 0 0 10px;
+}
+
 .modal-actions {
   display: flex;
   justify-content: flex-end;

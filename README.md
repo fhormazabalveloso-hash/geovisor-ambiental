@@ -283,6 +283,35 @@ Este documento se centra en el **Componente 1**.
     Baja=verde) como primera columna en el modal de resultados y en el
     Excel exportado (con su propio color de fondo por fila, igual que
     la columna Color de capa).
+- **(2026-09-24) Caso de prueba real como usuario + fix de cartografía
+  incompleta tras analizar.** Se probó el geovisor de punta a punta en
+  el papel de un técnico preparando la licitación de un **cerramiento
+  perimetral** (caso completo documentado en
+  `investigacion/ejemplos-de-uso/caso-cerramiento-planta-agroindustrial.md`,
+  fuera de Git). Hallazgo principal: tras "Analizar afecciones", la
+  tabla de resultados podía mostrar 6 capas con afección real, pero al
+  ir directo a "Exportar cartografía" **el plano y la leyenda solo
+  mostraban las 2 capas que ya estaban marcadas a mano de antes** - las
+  demás se activaban solo temporalmente para poder consultarlas
+  (`analyzeUploadedLayer`) y volvían a su estado anterior al terminar,
+  sin avisar. Riesgo real para un expediente: el Excel podía decir una
+  cosa y el plano exportado otra. **Fix:** las capas con cruce directo
+  (`count > 0`) se quedan activadas de verdad (estado interno **y**
+  casilla del panel, vía `buildLayerPanel()` - la exportación de
+  cartografía lee la casilla del DOM, no solo el estado interno) tras
+  el análisis, con un aviso verde en el propio modal de resultados
+  listando qué se activó y por qué, para que no sea una sorpresa
+  silenciosa. Verificado exportando cartografía justo después de
+  analizar, sin tocar ninguna casilla: la leyenda salió completa con
+  las 6 capas. De paso quedaron documentados (mismo caso de prueba,
+  sin corregir todavía por ser de menor prioridad o sin solución
+  obvia): la escala de exportación puede salir mal ajustada si se
+  exporta justo tras analizar (el mapa queda encuadrado al margen de
+  búsqueda ampliado del análisis, no al tamaño real del proyecto), y
+  el mapa se vuelve difícil de leer cuando varias capas de polígono se
+  solapan físicamente (queda todo del mismo tono, sin distinguir
+  colores) - ver el documento del caso de prueba para el detalle
+  completo.
 
 ---
 
@@ -645,6 +674,19 @@ sigue saliendo de QGIS**; el visor acelera el paso previo (análisis + datos).
       `analysis.js` (cercanía sin cruce baja un escalón; Red Natura
       2000 con ZEC+ZEPA sube uno), mostrado como badge de color en el
       modal de resultados y en el Excel exportado.
+- [x] Cartografía incompleta si se exporta justo tras analizar
+      (2026-09-24, encontrado probando un caso real de cerramiento -
+      ver `investigacion/ejemplos-de-uso/`). Las capas con afección
+      directa se quedan activadas (estado + casilla) después de
+      "Analizar afecciones", con aviso en el propio modal, en vez de
+      volver a ocultarse en silencio.
+- [ ] Escala de exportación mal ajustada si se exporta justo tras
+      analizar (2026-09-24, mismo caso de prueba) - el mapa queda
+      encuadrado al margen de búsqueda ampliado del análisis (buffer +
+      2 km), no al tamaño real del proyecto. Sin corregir todavía.
+- [ ] Legibilidad del mapa con varias capas de polígono solapadas
+      (2026-09-24, mismo caso de prueba) - sin solución obvia, ver
+      `investigacion/ejemplos-de-uso/caso-cerramiento-planta-agroindustrial.md` §4.3.
 - [ ] (Después) Componente 2 - geovisor de proyectos desde MyMaps
 - [ ] (Después) Componente 3 - geovisor de arqueología (nuevo,
       2026-09-21, sin especificar todavía)
