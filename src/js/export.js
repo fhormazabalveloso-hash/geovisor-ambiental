@@ -35,6 +35,47 @@ const SCALE_OPTIONS = [500, 1000, 2000, 2500, 5000, 10000, 25000, 50000, 100000]
 // lo que sea el estilo no trae un valor numerico (p. ej. una expresion).
 const ON_SCREEN_LABEL_TEXT_SIZE = 11;
 
+// Factor para que cualquier valor en px CSS (grosor de linea, texto...)
+// ocupe el mismo tamano FISICO en el papel exportado que en pantalla,
+// sea cual sea EXPORT_DPI o el devicePixelRatio del navegador -- misma
+// idea que ya se aplicaba solo al texto (ver captureMapAtScale). Sin
+// esto, una linea de "4px" pensada para una pantalla normal (96 DPI) sale
+// visiblemente mas fina de lo esperado en un export a 200 DPI (encontrado
+// por Francisco probando el visor con un caso real, 2026-09-24: la linea
+// del trazado subido se veia demasiado fina en la cartografia impresa).
+function dpiScaleFactor(dpr) {
+  return EXPORT_DPI / (96 * dpr);
+}
+
+// Escala un valor de "line-width" para la exportacion. No se puede
+// envolver una expresion de zoom (["interpolate", ..., ["zoom"], ...],
+// como la que usan las capas de linea en main.js) dentro de otra
+// expresion tipo ["*", factor, expr] -- MapLibre exige que una expresion
+// de camara/zoom quede como expresion de NIVEL SUPERIOR de la propiedad,
+// si no rechaza el estilo entero (error real encontrado probando este
+// mismo fix: "zoom expressions may only be used as top-level expressions
+// [...] or a top-level 'step' or 'interpolate' expression"). En vez de
+// envolverla, se reescribe la misma expresion con sus valores de salida
+// multiplicados por el factor, que si es valido.
+function scaleLineWidthExpr(value, factor) {
+  if (typeof value === "number") return value * factor;
+  if (Array.isArray(value) && value[0] === "interpolate") {
+    // ["interpolate", tipo, entrada, parada1, valor1, parada2, valor2, ...]
+    const [op, interp, input, ...stops] = value;
+    const scaledStops = stops.map((v, i) => (i % 2 === 1 ? v * factor : v));
+    return [op, interp, input, ...scaledStops];
+  }
+  if (Array.isArray(value) && value[0] === "step") {
+    // ["step", entrada, valorBase, parada1, valor1, ...]
+    const [op, input, base, ...rest] = value;
+    const scaledRest = rest.map((v, i) => (i % 2 === 1 ? v * factor : v));
+    return [op, input, base * factor, ...scaledRest];
+  }
+  // Expresion de otro tipo no contemplada -- se deja sin escalar en vez
+  // de arriesgarse a romper el estilo con una que no se ha probado.
+  return value;
+}
+
 function mmToPx(mm, dpi) {
   return Math.round((mm / MM_PER_IN) * dpi);
 }
@@ -143,6 +184,22 @@ async function captureMapAtScale(targetScaleN, mapW, mapH) {
     map.setLayoutProperty(id, "text-size", exportPx);
   }
 
+  // Mismo criterio que el texto, aplicado al grosor de linea de TODAS las
+  // capas de tipo "line" del estilo actual (capas ambientales de linea,
+  // el contorno de poligono, el trazado subido, su propia opcion de
+  // "Grosor de linea"...) -- generico en vez de listar IDs a mano, asi
+  // cubre cualquier capa de linea presente sin mantenimiento aparte.
+  const lineWidthFactor = dpiScaleFactor(dpr);
+  const restoreLineWidths = [];
+  for (const layerDef of map.getStyle().layers) {
+    if (layerDef.type !== "line") continue;
+    const id = layerDef.id;
+    const original = map.getPaintProperty(id, "line-width");
+    if (original == null) continue;
+    restoreLineWidths.push([id, original]);
+    map.setPaintProperty(id, "line-width", scaleLineWidthExpr(original, lineWidthFactor));
+  }
+
   await new Promise((resolve) => {
     map.once("idle", resolve);
     // por si el mapa ya estaba "idle" y el evento no vuelve a disparar
@@ -163,6 +220,18 @@ async function captureMapAtScale(targetScaleN, mapW, mapH) {
   // capa completa, extendida a sus variantes de color).
   const renderedLayerIds = new Set();
   const renderedFieldValues = new Map(); // l.id -> Set de valores de colorByField presentes
+  // l.id -> Map(variante de colorByField, o "_all" si no tiene -> Set de
+  // nombres) -- para poder listar en la leyenda que elemento concreto es
+  // (p. ej. "Doñana", el río que se ve debajo de la capa de hidrografía)
+  // cuando el nombre no llegue a verse como texto sobre el propio mapa
+  // (su punto de etiqueta puede caer fuera del recuadro exportado, ver
+  // investigacion/ejemplos-de-uso/caso-cerramiento-planta-agroindustrial.md
+  // §4.3-bis -- pedido por Francisco probando el visor, 2026-09-24).
+  // ANALYSIS_PLACEHOLDER_NAMES esta definida en analysis.js (cargado
+  // despues que este fichero en index.html), pero esto solo se ejecuta
+  // dentro de un manejador de clic, mucho despues de que todos los
+  // <script> ya se hayan ejecutado -- mismo patron ya usado en upload.js.
+  const renderedNames = new Map();
   for (const l of LAYERS) {
     const cb = document.querySelector(`.layer-toggle[data-id="${l.id}"]`);
     if (!cb || !cb.checked) continue;
@@ -174,6 +243,33 @@ async function captureMapAtScale(targetScaleN, mapW, mapH) {
     if (l.colorByField) {
       renderedFieldValues.set(l.id, new Set(feats.map((f) => f.properties[l.colorByField])));
     }
+    if (l.labelField) {
+      const namesByVariant = new Map();
+      for (const f of feats) {
+        const variant = l.colorByField ? f.properties[l.colorByField] : "_all";
+        const raw = f.properties[l.labelField];
+        const clean = raw == null ? "" : String(raw).trim();
+        if (!clean || ANALYSIS_PLACEHOLDER_NAMES.has(clean.toLowerCase())) continue;
+        if (!namesByVariant.has(variant)) namesByVariant.set(variant, new Set());
+        namesByVariant.get(variant).add(clean);
+      }
+      renderedNames.set(l.id, namesByVariant);
+    }
+  }
+
+  // Igual que arriba pero para los tramos/puntos subidos por el usuario
+  // (idea de Francisco, 2026-09-24: la propia línea del proyecto no
+  // aparecía en la leyenda) -- una fila por tramo visible con algo
+  // realmente dibujado en esta vista, con su nombre de archivo y su
+  // propio color.
+  const uploadLegendRows = [];
+  for (const u of uploadedLayers) {
+    if (!u.visible) continue;
+    const candidateIds = [`${u.id}-fill`, `${u.id}-line`, `${u.id}-point`].filter((id) => map.getLayer(id));
+    if (!candidateIds.length) continue;
+    const feats = map.queryRenderedFeatures({ layers: candidateIds });
+    if (feats.length === 0) continue;
+    uploadLegendRows.push({ fill: u.color, line: u.color, nombre: u.name.replace(/\.[^.]+$/, "") });
   }
 
   const dataUrl = map.getCanvas().toDataURL("image/png");
@@ -181,12 +277,28 @@ async function captureMapAtScale(targetScaleN, mapW, mapH) {
   for (const [id, original] of restoreTextSizes) {
     map.setLayoutProperty(id, "text-size", original);
   }
+  for (const [id, original] of restoreLineWidths) {
+    map.setPaintProperty(id, "line-width", original);
+  }
 
   mapEl.setAttribute("style", prevStyle);
   map.resize();
   map.jumpTo({ center: originalCenter, zoom: originalZoom, bearing: originalBearing, pitch: originalPitch });
 
-  return { dataUrl, renderedLayerIds, renderedFieldValues };
+  return { dataUrl, renderedLayerIds, renderedFieldValues, renderedNames, uploadLegendRows };
+}
+
+// Cuantos nombres distintos como mucho se listan bajo cada fila de
+// leyenda (ver buildLegendRows) -- una capa muy densa en la vista
+// exportada (p. ej. la red hidrografica) podria traer decenas, y no cabe
+// ni tiene sentido listarlos todos.
+const LEGEND_MAX_NAMES = 3;
+
+function legendNamesSubtitle(namesSet) {
+  if (!namesSet || namesSet.size === 0) return null;
+  const arr = [...namesSet].sort();
+  const shown = arr.slice(0, LEGEND_MAX_NAMES).join(", ");
+  return arr.length > LEGEND_MAX_NAMES ? `${shown}…` : shown;
 }
 
 // Expande "capas visibles" a filas de leyenda: una fila por capa
@@ -194,18 +306,37 @@ async function captureMapAtScale(targetScaleN, mapW, mapH) {
 // valor de ese campo presente de verdad en esta vista -- ver
 // renderedFieldValues en captureMapAtScale). Sin esto, red_natura_2000
 // aparecería siempre como un unico verde en vez de distinguir ZEC/ZEPA.
-function buildLegendRows(visibleLayers, renderedFieldValues) {
+//
+// Cada fila lleva ademas un "subtitle" con el/los nombre(s) de elemento
+// realmente presentes en la vista exportada (p. ej. "Doñana", o el
+// nombre del rio) -- pensado como respaldo para cuando el nombre no
+// llega a verse como texto sobre el propio mapa porque su punto de
+// etiqueta cae fuera del recuadro exportado (limitacion documentada en
+// investigacion/ejemplos-de-uso/caso-cerramiento-planta-agroindustrial.md
+// §4.3-bis; pedido por Francisco probando el visor, 2026-09-24).
+function buildLegendRows(visibleLayers, renderedFieldValues, renderedNames) {
   const rows = [];
   for (const l of visibleLayers) {
+    const namesByVariant = renderedNames.get(l.id);
     if (l.colorByField && l.colorByValue) {
       const present = renderedFieldValues.get(l.id);
       const baseName = l.nombre.replace(/\s*\([^)]*\)\s*$/, "");
       for (const [value, cfg] of Object.entries(l.colorByValue)) {
         if (present && !present.has(value)) continue;
-        rows.push({ fill: cfg.fill, line: cfg.line, nombre: `${baseName} - ${cfg.label}` });
+        rows.push({
+          fill: cfg.fill,
+          line: cfg.line,
+          nombre: `${baseName} - ${cfg.label}`,
+          subtitle: legendNamesSubtitle(namesByVariant && namesByVariant.get(value)),
+        });
       }
     } else {
-      rows.push({ fill: l.color.fill, line: l.color.line, nombre: l.nombre });
+      rows.push({
+        fill: l.color.fill,
+        line: l.color.line,
+        nombre: l.nombre,
+        subtitle: legendNamesSubtitle(namesByVariant && namesByVariant.get("_all")),
+      });
     }
   }
   return rows;
@@ -251,16 +382,24 @@ function drawScaleBar(ctx, x, y, scaleN) {
   ctx.restore();
 }
 
-function drawLegend(ctx, x, y, visibleLayers, maxHeight, renderedFieldValues) {
-  const legendRows = buildLegendRows(visibleLayers, renderedFieldValues);
+// legendRows: array ya construido (buildLegendRows para las capas
+// ambientales, concatenado con las filas de los tramos/puntos subidos --
+// ver generateCartography) para poder combinar ambas fuentes sin que
+// drawLegend tenga que saber de donde viene cada fila.
+function drawLegend(ctx, x, y, legendRows, maxHeight) {
   const titleSize = px(5.5);
   const rowTextSize = px(4);
+  const subtitleTextSize = px(3.2);
   const swatchSize = px(4.5);
   const rowH = px(7.5);
+  const subtitleH = px(4); // espacio extra solo para las filas que traen subtitle
   const padding = px(5);
   const titleBlockH = px(11);
   const width = px(75);
-  const height = Math.min(maxHeight, padding * 2 + titleBlockH + legendRows.length * rowH);
+
+  const rowHeights = legendRows.map((r) => rowH + (r.subtitle ? subtitleH : 0));
+  const totalRowsH = rowHeights.reduce((a, b) => a + b, 0);
+  const height = Math.min(maxHeight, padding * 2 + titleBlockH + totalRowsH);
 
   ctx.save();
   ctx.fillStyle = "rgba(255,255,255,0.92)";
@@ -275,8 +414,10 @@ function drawLegend(ctx, x, y, visibleLayers, maxHeight, renderedFieldValues) {
   ctx.fillText("Leyenda", x + padding, y + padding);
 
   let rowY = y + padding + titleBlockH;
-  for (const row of legendRows) {
-    if (rowY + rowH > y + height) break;
+  for (let i = 0; i < legendRows.length; i++) {
+    const row = legendRows[i];
+    const thisRowH = rowHeights[i];
+    if (rowY + thisRowH > y + height) break;
     ctx.fillStyle = row.fill;
     ctx.fillRect(x + padding, rowY + (rowH - swatchSize) / 2, swatchSize, swatchSize);
     ctx.strokeStyle = row.line;
@@ -291,7 +432,17 @@ function drawLegend(ctx, x, y, visibleLayers, maxHeight, renderedFieldValues) {
       rowY + (rowH - rowTextSize) / 2,
       width - padding * 2 - swatchSize - px(3)
     );
-    rowY += rowH;
+    if (row.subtitle) {
+      ctx.fillStyle = "#666";
+      ctx.font = `italic ${subtitleTextSize}px Arial`;
+      ctx.fillText(
+        row.subtitle,
+        x + padding + swatchSize + px(3),
+        rowY + rowH,
+        width - padding * 2 - swatchSize - px(3)
+      );
+    }
+    rowY += thisRowH;
   }
   ctx.restore();
   return height;
@@ -351,7 +502,7 @@ async function generateCartography(orientation, title, subtitle, scaleN) {
   const mapH = totalH - cajetinH;
   const mapW = totalW;
 
-  const { dataUrl, renderedLayerIds, renderedFieldValues } = await captureMapAtScale(scaleN, mapW, mapH);
+  const { dataUrl, renderedLayerIds, renderedFieldValues, renderedNames, uploadLegendRows } = await captureMapAtScale(scaleN, mapW, mapH);
   const mapImg = await loadImage(dataUrl);
 
   const canvas = document.createElement("canvas");
@@ -365,7 +516,11 @@ async function generateCartography(orientation, title, subtitle, scaleN) {
 
   const margin = px(8);
   const visibleLayers = LAYERS.filter((l) => renderedLayerIds.has(l.id));
-  drawLegend(ctx, margin, margin, visibleLayers, mapH - margin * 2, renderedFieldValues);
+  // Filas de las capas ambientales + una por cada tramo/punto subido
+  // visible con algo dibujado en esta vista (idea de Francisco,
+  // 2026-09-24: la línea del proyecto no salía en la leyenda).
+  const legendRows = buildLegendRows(visibleLayers, renderedFieldValues, renderedNames).concat(uploadLegendRows);
+  drawLegend(ctx, margin, margin, legendRows, mapH - margin * 2);
 
   const arrowSize = Math.round(totalW * 0.035);
   await drawNorthArrow(ctx, mapW - arrowSize - margin, margin, arrowSize);

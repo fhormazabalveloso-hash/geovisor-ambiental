@@ -346,6 +346,45 @@ Este documento se centra en el **Componente 1**.
   1:2.500 (antes 1:25.000) y la cartografía generada mostró el
   cerramiento y su entorno correctamente, sin ningún paso manual de por
   medio.
+- **(2026-09-24) 3 mejoras de cartografía a partir de un caso real de
+  Francisco.** Probando el visor con un proyecto real propio (no un caso
+  sintético mío), Francisco pidió tres ajustes concretos sobre la
+  cartografía exportada:
+  1. **Grosor de línea personalizable.** El trazado subido siempre
+     dibujaba a 4px fijos - se veía demasiado fino en la cartografía
+     impresa. Nuevo control "Grosor de línea" en el panel de
+     "Tramos y puntos subidos" (`upload.js`, 1-10px), por tramo. De
+     paso se encontró la causa raíz de que se viera tan fino: igual que
+     ya pasaba con el texto (ver §2 2026-09-23), un grosor en px CSS
+     pensado para pantalla (96 DPI) sale proporcionalmente más fino al
+     exportar a `EXPORT_DPI` (200) - `export.js` ahora escala
+     automáticamente el `line-width` de **todas** las capas de línea del
+     estilo (ambientales y del trazado subido) antes de capturar, con el
+     mismo criterio que ya se aplicaba al texto. Detalle técnico: no se
+     puede envolver una expresión de zoom (el `interpolate` que usan las
+     capas de línea ambientales) dentro de otra expresión - MapLibre
+     exige que quede como expresión de nivel superior - así que se
+     reescribe la misma expresión con sus valores de salida
+     multiplicados, en vez de envolverla (`scaleLineWidthExpr`).
+  2. **La línea/capa del proyecto en la leyenda.** La leyenda exportada
+     solo listaba capas ambientales, nunca el propio trazado subido.
+     Ahora añade una fila por cada tramo/punto visible con algo
+     realmente dibujado en la vista exportada (mismo criterio de "solo
+     lo visible de verdad" que ya se aplicaba a las capas ambientales),
+     con su nombre de archivo y su color.
+  3. **Nombres de elemento en la leyenda como respaldo.** Cuando el
+     nombre de un elemento no llega a verse como texto sobre el propio
+     mapa (su punto de etiqueta puede caer fuera del recuadro exportado
+     - limitación documentada en
+     `investigacion/ejemplos-de-uso/caso-cerramiento-planta-agroindustrial.md`
+     §4.3-bis), ahora aparece bajo el nombre de la capa en la leyenda
+     (p. ej. "Río Manzanares" bajo "DPH deslindado"), hasta 3 nombres
+     distintos por fila. Reutiliza la misma consulta de features que ya
+     se hacía para decidir qué capas incluir en la leyenda, sin
+     consultas nuevas.
+
+  Verificado con el mismo caso de la carretera: los tres cambios juntos
+  en una única cartografía exportada (`investigacion/ejemplos-de-uso/`).
 
 ---
 
@@ -723,6 +762,12 @@ sigue saliendo de QGIS**; el visor acelera el paso previo (análisis + datos).
 - [ ] Legibilidad del mapa con varias capas de polígono solapadas
       (2026-09-24, mismo caso de prueba) - sin solución obvia, ver
       `investigacion/ejemplos-de-uso/caso-cerramiento-planta-agroindustrial.md` §4.3.
+- [x] 3 mejoras de cartografía pedidas por Francisco probando el visor
+      con un proyecto real (2026-09-24): grosor de línea personalizable
+      por tramo (con el mismo fix de escalado por DPI que ya tenía el
+      texto), la línea/capa del proyecto en la leyenda exportada, y los
+      nombres de elemento como respaldo en la leyenda cuando no llegan a
+      verse como texto sobre el mapa.
 - [ ] (Después) Componente 2 - geovisor de proyectos desde MyMaps
 - [ ] (Después) Componente 3 - geovisor de arqueología (nuevo,
       2026-09-21, sin especificar todavía)

@@ -156,6 +156,21 @@ html, body {
   color: #C0392B;
 }
 
+.upload-linewidth-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 3px 0 0;
+  font-size: 11px;
+  color: #555;
+}
+
+.upload-linewidth-row input[type="range"] {
+  flex: 1;
+  height: 12px;
+  accent-color: var(--quadrante-blue);
+}
+
 .upload-buffer-row {
   display: flex;
   align-items: center;

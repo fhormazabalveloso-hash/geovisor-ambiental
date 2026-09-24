@@ -18,6 +18,15 @@ const UPLOAD_COLORS = ["#E91E63", "#00BCD4", "#FF9800", "#673AB7", "#CDDC39", "#
 // vias pecuarias); 1-5 km para el ambito de estudio real de una EIA
 // (avifauna, cuenca hidrografica) sobre trazados largos -- ver README §9.
 const BUFFER_OPTIONS = [0, 25, 50, 100, 200, 500, 1000, 2000, 5000];
+// Grosor de linea del trazado subido, en px CSS -- personalizable por
+// tramo/punto (pedido por Francisco probando el visor con un caso real,
+// 2026-09-24: en la cartografia exportada la linea del proyecto se veia
+// demasiado fina). El valor se escala automaticamente para la resolucion
+// de exportacion en export.js (ver dpiScaleFactor), asi que "10" aqui se
+// ve igual de grueso en pantalla que en el PDF/PNG impreso.
+const LINE_WIDTH_MIN = 1;
+const LINE_WIDTH_MAX = 10;
+const LINE_WIDTH_DEFAULT = 4;
 
 function bufferLabel(m) {
   if (m === 0) return "Sin buffer";
@@ -25,7 +34,7 @@ function bufferLabel(m) {
 }
 
 let uploadCounter = 0;
-const uploadedLayers = []; // { id, name, geojson, color, visible, opacity, bufferMeters, bufferOpacity }
+const uploadedLayers = []; // { id, name, geojson, color, visible, opacity, lineWidth, bufferMeters, bufferOpacity }
 
 function nextUploadColor() {
   return UPLOAD_COLORS[uploadCounter % UPLOAD_COLORS.length];
@@ -67,7 +76,7 @@ function addUploadedLayerToMap(u) {
     source: u.id,
     filter: ["match", ["geometry-type"], ["LineString", "Polygon"], true, false],
     layout: { visibility: u.visible ? "visible" : "none" },
-    paint: { "line-color": u.color, "line-width": 4, "line-opacity": u.opacity },
+    paint: { "line-color": u.color, "line-width": u.lineWidth, "line-opacity": u.opacity },
   });
   map.addLayer({
     id: `${u.id}-point`,
@@ -139,6 +148,7 @@ function applyUploadedLayerState(u) {
   if (map.getLayer(`${u.id}-line`)) {
     map.setLayoutProperty(`${u.id}-line`, "visibility", vis);
     map.setPaintProperty(`${u.id}-line`, "line-opacity", u.opacity);
+    map.setPaintProperty(`${u.id}-line`, "line-width", u.lineWidth);
   }
   if (map.getLayer(`${u.id}-point`)) {
     map.setLayoutProperty(`${u.id}-point`, "visibility", vis);
@@ -298,6 +308,10 @@ function buildUploadPanel() {
           <button class="upload-remove-btn" data-id="${u.id}" title="Quitar">✕</button>
         </div>
         <input type="range" class="upload-opacity" data-id="${u.id}" min="0" max="100" value="${opacityPct}" title="Transparencia del trazado">
+        <div class="upload-linewidth-row">
+          <span>Grosor de línea</span>
+          <input type="range" class="upload-linewidth" data-id="${u.id}" min="${LINE_WIDTH_MIN}" max="${LINE_WIDTH_MAX}" step="0.5" value="${u.lineWidth}" title="Grosor de línea del trazado">
+        </div>
         <label class="upload-buffer-row">
           Buffer:
           <select class="upload-buffer-select" data-id="${u.id}">${bufferOptionsHtml}</select>
@@ -322,6 +336,13 @@ function buildUploadPanel() {
     sl.addEventListener("input", () => {
       const u = uploadedLayers.find((x) => x.id === sl.dataset.id);
       u.opacity = Number(sl.value) / 100;
+      applyUploadedLayerState(u);
+    });
+  });
+  panel.querySelectorAll(".upload-linewidth").forEach((sl) => {
+    sl.addEventListener("input", () => {
+      const u = uploadedLayers.find((x) => x.id === sl.dataset.id);
+      u.lineWidth = Number(sl.value);
       applyUploadedLayerState(u);
     });
   });
@@ -367,6 +388,7 @@ function addUploadedLayer(name, geojson) {
     color: nextUploadColor(),
     visible: true,
     opacity: 1,
+    lineWidth: LINE_WIDTH_DEFAULT,
     bufferMeters: 0,
     bufferOpacity: 0.3,
   };
