@@ -443,6 +443,28 @@ async function analyzeUploadedLayer(u, overrides = {}) {
     // sin marcar y el problema original seguiria ahi a medias.
     buildLayerPanel();
 
+    // El mapa queda encuadrado al area de BUSQUEDA ampliada (bufferMaxM +
+    // NEAREST_SEARCH_MARGIN_M, ver mas arriba) porque hacia falta para
+    // consultar "cerca, sin cruce directo" -- pero para el usuario, tanto
+    // para ver el resultado en el mapa como para la escala que sugiere
+    // "Exportar cartografia" (que se calcula a partir de la vista actual,
+    // ver export.js), esa vista tan amplia deja el proyecto como un punto
+    // casi invisible salvo que se reencuadre a mano antes de exportar
+    // (encontrado probando un caso real de cerramiento, ver
+    // investigacion/ejemplos-de-uso/caso-cerramiento-planta-agroindustrial.md
+    // §4.2). Fix: al terminar, se reencuadra al area de los buffers
+    // REALMENTE usados para el cruce (sin el margen extra de busqueda),
+    // que es lo relevante para mirar/exportar el resultado.
+    const finalViewPolygon = computeUnifiedBufferPolygon(u.geojson, maxBufferM);
+    if (finalViewPolygon) {
+      const finalBbox = turf.bbox(finalViewPolygon);
+      map.fitBounds([[finalBbox[0], finalBbox[1]], [finalBbox[2], finalBbox[3]]], {
+        padding: 60,
+        animate: false,
+        maxZoom: 17,
+      });
+    }
+
     u.layerBufferOverrides = overrides;
     u.autoActivatedLayers = autoActivated;
     showAnalysisResults(u, results);

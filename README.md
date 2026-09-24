@@ -331,6 +331,21 @@ Este documento se centra en el **Componente 1**.
   pruebas, no la aplicación) y se regeneraron las capturas del primer
   caso que habían desaparecido de la carpeta entre sesiones (posible
   sincronización de OneDrive - ver nota en ese mismo documento).
+- **(2026-09-24) Fix del hallazgo §4.2: reencuadre automático tras
+  analizar.** `analyzeUploadedLayer()` dejaba el mapa encuadrado al área
+  de búsqueda ampliada (buffer + 2 km, necesaria para detectar "cerca,
+  sin cruce directo") también DESPUÉS de terminar, así que la escala que
+  sugiere "Exportar cartografía" (calculada a partir de la vista actual)
+  salía muy alejada si se exportaba justo después de analizar, sin
+  reencuadrar a mano - el cerramiento de prueba llegó a verse como un
+  punto casi invisible en el plano. **Fix:** al terminar el análisis, el
+  mapa se reencuadra al área de los buffers realmente usados para el
+  cruce (sin el margen extra de búsqueda) - lo relevante para mirar/
+  exportar el resultado. Verificado: tras analizar el mismo caso de
+  prueba, sin tocar nada, la escala sugerida salió directamente en
+  1:2.500 (antes 1:25.000) y la cartografía generada mostró el
+  cerramiento y su entorno correctamente, sin ningún paso manual de por
+  medio.
 
 ---
 
@@ -699,10 +714,12 @@ sigue saliendo de QGIS**; el visor acelera el paso previo (análisis + datos).
       directa se quedan activadas (estado + casilla) después de
       "Analizar afecciones", con aviso en el propio modal, en vez de
       volver a ocultarse en silencio.
-- [ ] Escala de exportación mal ajustada si se exporta justo tras
-      analizar (2026-09-24, mismo caso de prueba) - el mapa queda
+- [x] Escala de exportación mal ajustada si se exporta justo tras
+      analizar (2026-09-24, mismo caso de prueba) - el mapa quedaba
       encuadrado al margen de búsqueda ampliado del análisis (buffer +
-      2 km), no al tamaño real del proyecto. Sin corregir todavía.
+      2 km), no al tamaño real del proyecto. Corregido: al terminar el
+      análisis, el mapa se reencuadra al área de los buffers realmente
+      usados para el cruce.
 - [ ] Legibilidad del mapa con varias capas de polígono solapadas
       (2026-09-24, mismo caso de prueba) - sin solución obvia, ver
       `investigacion/ejemplos-de-uso/caso-cerramiento-planta-agroindustrial.md` §4.3.
