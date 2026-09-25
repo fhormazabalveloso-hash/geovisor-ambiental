@@ -432,6 +432,31 @@ Este documento se centra en el **Componente 1**.
   un cambio de tamaño del contenedor (lienzo de 400 px dentro de un
   contenedor de 1.280 px); tras `map.resize()` la escala salió correcta.
 
+- **2026-09-25 - Segunda ronda de investigación de geovisores (Europa y
+  resto del mundo).** Dos investigaciones web en paralelo, verificadas en
+  webs oficiales, manuales e informes de ejemplo reales. En los servicios
+  que podrían consultarse desde el navegador se comprobó con una petición
+  real si aceptan CORS, porque de eso depende que encajen en la
+  arquitectura sin servidor. Conclusiones principales:
+  - Lo que distingue a las mejores herramientas de cribado (NEPAssist en
+    EE. UU., PMST en Australia, Impact Risk Zones en Reino Unido, Análisis
+    Territorial del SEA en Chile) es **cómo presentan las conclusiones**:
+    preguntas de sí/no ("¿atraviesa Red Natura? Sí: Doñana, 22,6 ha"),
+    distinción "intersecta el trazado" / "solo en el buffer" y **qué
+    implica** cada hallazgo. Nuestra app ya calcula casi todo eso; falta
+    sobre todo presentarlo así.
+  - Las zonas inundables del **SNCZI se pueden consultar en vivo por WFS**
+    (CORS abierto, verificado). Evitaría teselar 3 de las 5 capas grandes
+    pendientes (T10/T100/T500).
+  - **WDPA, KBA y Lista Roja de la UICN quedan descartadas** por licencia
+    (prohíben o limitan el uso comercial y la redistribución en mapas
+    web). Por el mismo motivo hay que **revisar la licencia de nuestra
+    capa IBA** (ecosistema BirdLife) antes de publicar el visor.
+
+  Se proponen 12 ideas priorizadas. Informe completo en
+  `investigacion/ideas-mejora-geovisores-ronda2.md` (fuera de git, como
+  todo `investigacion/`).
+
 ---
 
 ## 3. Arquitectura objetivo
@@ -727,8 +752,12 @@ sigue saliendo de QGIS**; el visor acelera el paso previo (análisis + datos).
       (`exceljs@4`, MIT, también libre), que sí escribe colores, tablas
       nativas y congelar paneles correctamente - verificado con el mismo
       tipo de prueba round-trip.
-- [ ] Probar el cruce de afecciones con un tramo/caso **real** (las
-      pruebas hechas hasta ahora usan tramos sintéticos sobre Doñana)
+- [x] Probar el cruce de afecciones con un tramo/caso **real**
+      (2026-09-24/25): dos casos realistas de punta a punta, un
+      cerramiento de planta agroindustrial y una carretera que cruza el
+      río Manzanares, más un proyecto real de Francisco. Los fallos que
+      salieron se corrigieron (ver las entradas del 24 y 25/09).
+      Documentado en `investigacion/ejemplos-de-uso/`.
 - [ ] Generar las 5 capas grandes pendientes (inundabilidad T10/T100/T500,
       DPH cartográfico probable, montes de utilidad pública) - **dejado
       para el final** (decisión 2026-09-23), no bloquea nada más del
@@ -825,6 +854,20 @@ sigue saliendo de QGIS**; el visor acelera el paso previo (análisis + datos).
       símbolos según tipo de elemento, mapa de situación, cuadrícula UTM
       ETRS89 rotulada en el marco, e informe PDF único (cartografía +
       tabla de afecciones con semáforo + notas de metodología).
+- [ ] Revisar la licencia de la capa IBA (`IBA_España_2025_11_05.gpkg`,
+      ecosistema BirdLife) antes de publicar el visor (2026-09-25, ver
+      §2)
+- [ ] Ideas de la segunda ronda de investigación (2026-09-25,
+      `investigacion/ideas-mejora-geovisores-ronda2.md`). Recomendado
+      para la próxima semana:
+      1. Portada de conclusiones del informe (preguntas de sí/no,
+         "intersecta" / "solo en el buffer").
+      2. Guardar y compartir el proyecto (`.json` + vista en la URL).
+      3. Exportar el recorte de capas para QGIS (GeoJSON/KML).
+      4. Ortofotos históricas del IGN con cortinilla.
+
+      Después: tipo de obra + "¿qué implica?", y zonas inundables SNCZI
+      por WFS.
 - [ ] (Después) Componente 2 - geovisor de proyectos desde MyMaps
 - [ ] (Después) Componente 3 - geovisor de arqueología (nuevo,
       2026-09-21, sin especificar todavía)
