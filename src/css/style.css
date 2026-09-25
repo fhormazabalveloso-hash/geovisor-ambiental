@@ -758,6 +758,19 @@ html, body {
   font-weight: 400;
 }
 
+/* Opciones de la cartografia exportada (mapa de situacion, cuadricula) */
+.modal-checks {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-weight: 400;
+}
+
+.modal-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .modal-note {
   font-size: 11.5px;
   color: #777;

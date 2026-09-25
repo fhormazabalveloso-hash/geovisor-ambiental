@@ -385,6 +385,52 @@ Este documento se centra en el **Componente 1**.
 
   Verificado con el mismo caso de la carretera: los tres cambios juntos
   en una única cartografía exportada (`investigacion/ejemplos-de-uso/`).
+- **(2026-09-25) 5 mejoras de cartografía propuestas tras revisar la
+  cartografía real de Francisco (aceptadas todas).**
+  1. **Buffer como contorno discontinuo.** En su plano real, el relleno
+     del buffer tapaba las capas ambientales que tenía debajo. Nuevo
+     selector "Estilo" por tramo (`upload.js`): contorno (por defecto),
+     relleno, o ambos - capa nueva `<id>-buffer-line` con
+     `line-dasharray`.
+  2. **El buffer en la leyenda** ("Buffer 500 m"), con un símbolo que
+     imita su estilo (recuadro discontinuo y/o relleno). De paso la
+     leyenda dibuja ahora un símbolo según el tipo de elemento: trazo
+     para las líneas (red hidrográfica, vías pecuarias, el trazado
+     subido con su grosor real), círculo para los puntos, cuadrado para
+     los polígonos.
+  3. **Mapa de situación** (ver §7): recuadro abajo a la derecha, a
+     escala fija 1:2.500.000, con el mapa base y los límites
+     provinciales/autonómicos, y la zona del plano marcada en rojo (o
+     un punto si a esa escala es demasiado pequeña). Es una segunda
+     captura del mismo mapa (`captureInset` en `export.js`) con el resto
+     de capas ocultas un momento - sin datos ni servicios nuevos.
+  4. **Cuadrícula UTM** en el marco, con coordenadas rotuladas en el
+     borde (`computeUtmGrid`, vía `proj4`). Huso según la longitud del
+     centro (29-31 en península/Baleares, 27-28 en Canarias - rotulado
+     como REGCAN95, su sistema oficial). El cajetín indica el sistema de
+     la cuadrícula. Los rótulos se dibujan al final y se descartan los
+     que chocan con leyenda, flecha, escala o mapa de situación
+     (encontrado en la primera prueba: "4.479.000" quedaba medio tapado
+     por la leyenda). Las líneas se muestrean en 16 puntos en vez de
+     trazarse rectas, por la convergencia de meridianos sobre Web
+     Mercator.
+  5. **Informe PDF único** ("Descargar informe (PDF)"): página 1 la
+     cartografía A3; siguientes (A4 apaisado) la tabla de afecciones del
+     último análisis con el semáforo coloreado y las notas de
+     metodología del Excel, con pie y número de página. Tabla con
+     `jspdf-autotable` para que el texto sea seleccionable, y
+     cartografía en JPEG para que el informe pese ~3 MB en vez de ~15
+     MB. Desactivado (con aviso) si no se ha analizado ningún tramo.
+
+  Cada una se puede activar/desactivar desde el modal de exportación
+  (mapa de situación y cuadrícula, activados por defecto). Verificado de
+  punta a punta con el caso de la carretera del Manzanares: cartografía
+  PNG + informe PDF revisados página a página
+  (`investigacion/ejemplos-de-uso/`). Nota de prueba: el primer intento
+  sugirió una escala 1:50.000 en vez de 1:10.000 - no era un fallo de la
+  app, sino que el navegador de pruebas no había avisado a MapLibre de
+  un cambio de tamaño del contenedor (lienzo de 400 px dentro de un
+  contenedor de 1.280 px); tras `map.resize()` la escala salió correcta.
 
 ---
 
@@ -536,7 +582,10 @@ Formato de referencia (plano de localización real de Quadrante):
   (ej. *"Elaboración propia a partir de ADIF e IGN · ETRS89/UTM 30N ·
   EPSG:25830"*).
 - Elementos: flecha norte oficial (SVG en `assets/`), escala gráfica,
-  leyenda, e (opcional) insets de localización provincia/municipio.
+  leyenda, mapa de situación (inset a 1:2.500.000 con límites
+  provinciales/autonómicos, implementado 2026-09-25) y cuadrícula UTM
+  rotulada en el marco (ETRS89, o REGCAN95 en Canarias) - ambos
+  opcionales desde el modal de exportación.
 - Color corporativo: **azul `#182C54`**.
 - Activos disponibles: `QDE_META_Blue.svg`, `QDE_META_White.svg`,
   `QDE_META_symbol_blue/white.svg`, `NORTE.svg`.
@@ -762,12 +811,20 @@ sigue saliendo de QGIS**; el visor acelera el paso previo (análisis + datos).
 - [ ] Legibilidad del mapa con varias capas de polígono solapadas
       (2026-09-24, mismo caso de prueba) - sin solución obvia, ver
       `investigacion/ejemplos-de-uso/caso-cerramiento-planta-agroindustrial.md` §4.3.
+      En parte mitigado (2026-09-25): el buffer ya no suma otro relleno
+      encima por defecto (solo contorno); el solape entre capas
+      ambientales sigue pendiente.
 - [x] 3 mejoras de cartografía pedidas por Francisco probando el visor
       con un proyecto real (2026-09-24): grosor de línea personalizable
       por tramo (con el mismo fix de escalado por DPI que ya tenía el
       texto), la línea/capa del proyecto en la leyenda exportada, y los
       nombres de elemento como respaldo en la leyenda cuando no llegan a
       verse como texto sobre el mapa.
+- [x] 5 mejoras de cartografía (2026-09-25): buffer como contorno
+      discontinuo (estilo configurable), buffer en la leyenda con
+      símbolos según tipo de elemento, mapa de situación, cuadrícula UTM
+      ETRS89 rotulada en el marco, e informe PDF único (cartografía +
+      tabla de afecciones con semáforo + notas de metodología).
 - [ ] (Después) Componente 2 - geovisor de proyectos desde MyMaps
 - [ ] (Después) Componente 3 - geovisor de arqueología (nuevo,
       2026-09-21, sin especificar todavía)

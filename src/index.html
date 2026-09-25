@@ -87,6 +87,11 @@
           </select>
         </label>
 
+        <div class="modal-field modal-checks">
+          <label><input type="checkbox" id="export-inset" checked> Incluir mapa de situación</label>
+          <label><input type="checkbox" id="export-grid" checked> Incluir cuadrícula UTM (ETRS89)</label>
+        </div>
+
         <p class="modal-note">La escala se calcula por defecto a partir de tu vista actual (redondeada a la más cercana de la lista) — puedes cambiarla antes de generar. El centro del mapa será el mismo que tienes ahora.</p>
 
         <div class="modal-actions">
@@ -98,8 +103,10 @@
           <img id="export-preview" alt="Vista previa de la cartografía exportada">
           <div class="modal-actions">
             <button id="export-download-png">Descargar PNG</button>
-            <button id="export-download-pdf" class="primary">Descargar PDF</button>
+            <button id="export-download-pdf">Descargar PDF</button>
+            <button id="export-download-report" class="primary">Descargar informe (PDF)</button>
           </div>
+          <p id="export-report-note" class="modal-note" hidden>El informe junta esta cartografía con la tabla de afecciones — ejecuta antes «Analizar afecciones» en un tramo para poder generarlo.</p>
         </div>
       </div>
     </div>
@@ -142,6 +149,8 @@
   <script src="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.js"></script>
   <script src="https://unpkg.com/pmtiles@3/dist/pmtiles.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2/dist/jspdf.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3/dist/jspdf.plugin.autotable.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/proj4@2/dist/proj4.js"></script>
   <script src="https://unpkg.com/shpjs@4/dist/shp.min.js"></script>
   <script src="https://unpkg.com/togeojson@0.16.0/togeojson.js"></script>
   <script src="https://unpkg.com/jszip@3/dist/jszip.min.js"></script>

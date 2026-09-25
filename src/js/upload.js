@@ -10,8 +10,8 @@
 // tres formatos juntos; se puede anadir despues si hace falta.
 //
 // Buffer: se calcula con Turf.js (turf.buffer), en un radio fijo elegido
-// por el usuario (25/50/100/200/500 m). El resultado se anade como una
-// capa de relleno translucido por debajo del trazado original.
+// por el usuario (25 m - 5 km). Se dibuja por debajo del trazado original,
+// como contorno discontinuo, relleno translucido o ambos (BUFFER_STYLES).
 
 const UPLOAD_COLORS = ["#E91E63", "#00BCD4", "#FF9800", "#673AB7", "#CDDC39", "#F44336", "#3F51B5", "#009688"];
 // metros, 0 = sin buffer. Hasta 500 m para afecciones puntuales (DPH,
@@ -28,20 +28,39 @@ const LINE_WIDTH_MIN = 1;
 const LINE_WIDTH_MAX = 10;
 const LINE_WIDTH_DEFAULT = 4;
 
+// Como se dibuja el buffer. Por defecto solo el contorno discontinuo: con
+// relleno, un buffer grande tapa las capas ambientales que tiene debajo --
+// justo lo que se esta intentando ver (visto en una cartografia real de
+// Francisco, 2026-09-25: el circulo de buffer apagaba todo el mapa).
+const BUFFER_STYLES = {
+  contorno: "Contorno",
+  relleno: "Relleno",
+  ambos: "Relleno + contorno",
+};
+const BUFFER_STYLE_DEFAULT = "contorno";
+
+function bufferHasFill(u) {
+  return u.bufferStyle === "relleno" || u.bufferStyle === "ambos";
+}
+
+function bufferHasOutline(u) {
+  return u.bufferStyle === "contorno" || u.bufferStyle === "ambos";
+}
+
 function bufferLabel(m) {
   if (m === 0) return "Sin buffer";
   return m >= 1000 ? `${m / 1000} km` : `${m} m`;
 }
 
 let uploadCounter = 0;
-const uploadedLayers = []; // { id, name, geojson, color, visible, opacity, lineWidth, bufferMeters, bufferOpacity }
+const uploadedLayers = []; // { id, name, geojson, color, visible, opacity, lineWidth, bufferMeters, bufferOpacity, bufferStyle }
 
 function nextUploadColor() {
   return UPLOAD_COLORS[uploadCounter % UPLOAD_COLORS.length];
 }
 
 function uploadLayerIds(u) {
-  return [`${u.id}-fill`, `${u.id}-line`, `${u.id}-point`, `${u.id}-buffer`];
+  return [`${u.id}-fill`, `${u.id}-line`, `${u.id}-point`, `${u.id}-buffer`, `${u.id}-buffer-line`];
 }
 
 function addUploadedLayerToMap(u) {
@@ -58,8 +77,15 @@ function addUploadedLayerToMap(u) {
     id: `${u.id}-buffer`,
     type: "fill",
     source: `${u.id}-buffer-src`,
-    layout: { visibility: u.visible && u.bufferMeters ? "visible" : "none" },
-    paint: { "fill-color": u.color, "fill-opacity": u.bufferOpacity, "fill-outline-color": u.color },
+    layout: { visibility: u.visible && u.bufferMeters && bufferHasFill(u) ? "visible" : "none" },
+    paint: { "fill-color": u.color, "fill-opacity": u.bufferOpacity },
+  });
+  map.addLayer({
+    id: `${u.id}-buffer-line`,
+    type: "line",
+    source: `${u.id}-buffer-src`,
+    layout: { visibility: u.visible && u.bufferMeters && bufferHasOutline(u) ? "visible" : "none" },
+    paint: { "line-color": u.color, "line-width": 2, "line-dasharray": [3, 2] },
   });
 
   map.addLayer({
@@ -155,8 +181,11 @@ function applyUploadedLayerState(u) {
     map.setPaintProperty(`${u.id}-point`, "circle-opacity", u.opacity);
   }
   if (map.getLayer(`${u.id}-buffer`)) {
-    map.setLayoutProperty(`${u.id}-buffer`, "visibility", u.bufferMeters ? vis : "none");
+    map.setLayoutProperty(`${u.id}-buffer`, "visibility", u.bufferMeters && bufferHasFill(u) ? vis : "none");
     map.setPaintProperty(`${u.id}-buffer`, "fill-opacity", u.bufferOpacity);
+  }
+  if (map.getLayer(`${u.id}-buffer-line`)) {
+    map.setLayoutProperty(`${u.id}-buffer-line`, "visibility", u.bufferMeters && bufferHasOutline(u) ? vis : "none");
   }
   if (map.getSource(`${u.id}-buffer-src`)) {
     map.getSource(`${u.id}-buffer-src`).setData(u.bufferGeojson);
@@ -297,6 +326,9 @@ function buildUploadPanel() {
     const bufferOptionsHtml = BUFFER_OPTIONS.map(
       (m) => `<option value="${m}" ${u.bufferMeters === m ? "selected" : ""}>${bufferLabel(m)}</option>`
     ).join("");
+    const bufferStyleOptionsHtml = Object.entries(BUFFER_STYLES)
+      .map(([key, label]) => `<option value="${key}" ${u.bufferStyle === key ? "selected" : ""}>${label}</option>`)
+      .join("");
     html += `
       <div class="layer-row upload-row">
         <div class="layer-row-main">
@@ -316,7 +348,11 @@ function buildUploadPanel() {
           Buffer:
           <select class="upload-buffer-select" data-id="${u.id}">${bufferOptionsHtml}</select>
         </label>
-        <div class="upload-buffer-opacity-row" ${u.bufferMeters ? "" : 'style="display:none"'}>
+        <label class="upload-buffer-row upload-buffer-style-row" ${u.bufferMeters ? "" : 'style="display:none"'}>
+          Estilo:
+          <select class="upload-buffer-style" data-id="${u.id}">${bufferStyleOptionsHtml}</select>
+        </label>
+        <div class="upload-buffer-opacity-row" ${u.bufferMeters && bufferHasFill(u) ? "" : 'style="display:none"'}>
           <span>Transparencia del buffer</span>
           <input type="range" class="upload-buffer-opacity" data-id="${u.id}" min="0" max="100" value="${Math.round(u.bufferOpacity * 100)}">
         </div>
@@ -353,8 +389,18 @@ function buildUploadPanel() {
       computeBuffer(u);
       applyUploadedLayerState(u);
       const row = sel.closest(".upload-row");
-      row.querySelector(".upload-buffer-opacity-row").style.display = u.bufferMeters ? "" : "none";
+      row.querySelector(".upload-buffer-style-row").style.display = u.bufferMeters ? "" : "none";
+      row.querySelector(".upload-buffer-opacity-row").style.display = u.bufferMeters && bufferHasFill(u) ? "" : "none";
       row.querySelector(".upload-analyze-btn").disabled = !u.bufferMeters;
+    });
+  });
+  panel.querySelectorAll(".upload-buffer-style").forEach((sel) => {
+    sel.addEventListener("change", () => {
+      const u = uploadedLayers.find((x) => x.id === sel.dataset.id);
+      u.bufferStyle = sel.value;
+      applyUploadedLayerState(u);
+      const row = sel.closest(".upload-row");
+      row.querySelector(".upload-buffer-opacity-row").style.display = u.bufferMeters && bufferHasFill(u) ? "" : "none";
     });
   });
   panel.querySelectorAll(".upload-buffer-opacity").forEach((sl) => {
@@ -391,6 +437,7 @@ function addUploadedLayer(name, geojson) {
     lineWidth: LINE_WIDTH_DEFAULT,
     bufferMeters: 0,
     bufferOpacity: 0.3,
+    bufferStyle: BUFFER_STYLE_DEFAULT,
   };
   uploadedLayers.push(u);
   addUploadedLayerToMap(u);

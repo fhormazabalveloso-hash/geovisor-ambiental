@@ -80,6 +80,28 @@ function mmToPx(mm, dpi) {
   return Math.round((mm / MM_PER_IN) * dpi);
 }
 
+// Un valor en px CSS de pantalla (96 DPI) expresado en px del lienzo de
+// exportacion -- para dibujar en la leyenda un simbolo de linea con el
+// mismo grosor fisico que tiene esa linea en el mapa exportado.
+function cssPxToOutputPx(v) {
+  return (v * EXPORT_DPI) / 96;
+}
+
+// Mapa de situacion (inset): recuadro pequeno abajo a la derecha con la
+// zona del proyecto en su contexto regional -- elemento habitual en un
+// plano de licitacion (README §7). Escala fija: a 1:2.500.000, 70 mm de
+// ancho cubren unos 175 km, suficiente para situar una provincia.
+const INSET_SCALE = 2500000;
+const INSET_MM = { w: 70, h: 52 };
+// Unicas capas (ademas del mapa base) que se dejan visibles en el inset.
+const INSET_CONTEXT_LAYER_IDS = ["limites_autonomicos-line", "limites_provinciales-line"];
+
+// Pasos de la cuadricula UTM, en metros -- se elige el menor que deje como
+// mucho ~6 lineas a lo ancho del mapa.
+const UTM_GRID_STEPS = [50, 100, 200, 250, 500, 1000, 2000, 2500, 5000, 10000, 20000, 25000, 50000, 100000];
+const UTM_GRID_MAX_LINES = 6;
+const UTM_GRID_SAMPLES = 16;
+
 // Tamanos fisicos (mm sobre el papel) de los elementos de la cartografia,
 // para que se vean bien proporcionados independientemente de la resolucion
 // de exportacion (EXPORT_DPI).
@@ -129,7 +151,117 @@ function niceScaleDistance(maxMeters) {
   return magnitude;
 }
 
-async function captureMapAtScale(targetScaleN, mapW, mapH) {
+// Huso UTM segun la longitud del centro del mapa. Espana peninsular y
+// Baleares caen en 29-31; Canarias en 27-28.
+function utmZoneForLon(lon) {
+  return Math.min(31, Math.max(27, Math.floor((lon + 180) / 6) + 1));
+}
+
+// Sistema de referencia de la cuadricula, para el cajetin. En Canarias el
+// oficial es REGCAN95 (EPSG:4082/4083), no ETRS89 -- mismo elipsoide GRS80
+// y diferencias submetricas, asi que la cuadricula es la misma; solo cambia
+// como se nombra.
+function utmCrsLabel(zone, lat) {
+  if (lat < 30) return `REGCAN95 · Cuadrícula UTM huso ${zone}N (EPSG:${zone === 27 ? 4082 : 4083})`;
+  return `ETRS89 · Cuadrícula UTM huso ${zone}N (EPSG:258${zone})`;
+}
+
+// Cuadricula UTM del mapa YA encuadrado a la escala de exportacion (se
+// llama desde captureMapAtScale antes de restaurar la vista). Devuelve las
+// lineas ya en px del lienzo de exportacion. Las lineas de E/N constante
+// no son exactamente rectas sobre Web Mercator (convergencia de
+// meridianos), asi que se muestrean en UTM_GRID_SAMPLES puntos en vez de
+// dibujarse como una recta entre dos extremos. Usa proj4 (index.html);
+// si no ha cargado, se exporta sin cuadricula en vez de fallar.
+function computeUtmGrid(outW, outH, dpr) {
+  if (typeof proj4 === "undefined") return null;
+  const cssW = outW / dpr;
+  const cssH = outH / dpr;
+  const center = map.unproject([cssW / 2, cssH / 2]);
+  const zone = utmZoneForLon(center.lng);
+  const def = `+proj=utm +zone=${zone} +ellps=GRS80 +units=m +no_defs`;
+  const toUtm = (ll) => proj4("EPSG:4326", def, [ll.lng, ll.lat]);
+
+  let minE = Infinity, maxE = -Infinity, minN = Infinity, maxN = -Infinity;
+  for (let i = 0; i <= 10; i++) {
+    const t = i / 10;
+    for (const p of [[t * cssW, 0], [t * cssW, cssH], [0, t * cssH], [cssW, t * cssH]]) {
+      const [e, n] = toUtm(map.unproject(p));
+      minE = Math.min(minE, e); maxE = Math.max(maxE, e);
+      minN = Math.min(minN, n); maxN = Math.max(maxN, n);
+    }
+  }
+  const widthM = maxE - minE;
+  const step = UTM_GRID_STEPS.find((s) => widthM / s <= UTM_GRID_MAX_LINES) || UTM_GRID_STEPS[UTM_GRID_STEPS.length - 1];
+
+  const toOut = (e, n) => {
+    const [lng, lat] = proj4(def, "EPSG:4326", [e, n]);
+    const p = map.project([lng, lat]);
+    return [p.x * dpr, p.y * dpr];
+  };
+  const eastings = [];
+  for (let e = Math.ceil(minE / step) * step; e <= maxE; e += step) {
+    const line = [];
+    for (let i = 0; i <= UTM_GRID_SAMPLES; i++) line.push(toOut(e, minN + ((maxN - minN) * i) / UTM_GRID_SAMPLES));
+    eastings.push({ value: e, line });
+  }
+  const northings = [];
+  for (let n = Math.ceil(minN / step) * step; n <= maxN; n += step) {
+    const line = [];
+    for (let i = 0; i <= UTM_GRID_SAMPLES; i++) line.push(toOut(minE + ((maxE - minE) * i) / UTM_GRID_SAMPLES, n));
+    northings.push({ value: n, line });
+  }
+  return { zone, crsLabel: utmCrsLabel(zone, center.lat), eastings, northings };
+}
+
+// Segunda captura, para el mapa de situacion: mismo centro, escala fija
+// INSET_SCALE, y solo el mapa base + limites provinciales/autonomicos (el
+// resto de capas se ocultan un momento y se restauran al terminar).
+// mainCorners: las 4 esquinas del mapa principal ya exportado, para poder
+// marcar en el inset que zona abarca.
+async function captureInset(insetW, insetH, dpr, center, mainCorners) {
+  const mapEl = document.getElementById("map");
+  const prevVis = [];
+  for (const layerDef of map.getStyle().layers) {
+    if (layerDef.id === "basemap") continue;
+    prevVis.push([layerDef.id, map.getLayoutProperty(layerDef.id, "visibility") || "visible"]);
+    map.setLayoutProperty(layerDef.id, "visibility", INSET_CONTEXT_LAYER_IDS.includes(layerDef.id) ? "visible" : "none");
+  }
+
+  mapEl.style.width = `${insetW / dpr}px`;
+  mapEl.style.height = `${insetH / dpr}px`;
+  map.resize();
+  map.jumpTo({ center, zoom: map.getZoom() });
+  const targetMetersPerCssPx = ((INSET_SCALE * MM_PER_IN) / 1000 / EXPORT_DPI) * dpr;
+  const zoomAdjustment = Math.log2(measureMetersPerCssPixel() / targetMetersPerCssPx);
+  map.jumpTo({ center, zoom: map.getZoom() + zoomAdjustment });
+
+  await new Promise((resolve) => {
+    map.once("idle", resolve);
+    setTimeout(resolve, 8000);
+  });
+  await new Promise((resolve) => setTimeout(resolve, 300));
+
+  const extentPx = mainCorners.map((ll) => {
+    const p = map.project(ll);
+    return [p.x * dpr, p.y * dpr];
+  });
+  const dataUrl = map.getCanvas().toDataURL("image/png");
+
+  for (const [id, vis] of prevVis) map.setLayoutProperty(id, "visibility", vis);
+  return { dataUrl, extentPx, w: insetW, h: insetH };
+}
+
+// Tipo de simbolo de leyenda para un tramo/punto subido segun su geometria.
+function uploadSwatchType(u) {
+  const types = u.geojson.features.filter((f) => f.geometry).map((f) => f.geometry.type);
+  if (types.some((t) => t.includes("Polygon"))) return "fill";
+  if (types.some((t) => t.includes("LineString"))) return "line";
+  return "point";
+}
+
+// options: { grid: bool, inset: bool } -- ver checkboxes del modal.
+async function captureMapAtScale(targetScaleN, mapW, mapH, options = {}) {
   const mapEl = document.getElementById("map");
   const prevStyle = mapEl.getAttribute("style") || "";
   const dpr = window.devicePixelRatio || 1;
@@ -261,18 +393,49 @@ async function captureMapAtScale(targetScaleN, mapW, mapH) {
   // (idea de Francisco, 2026-09-24: la propia línea del proyecto no
   // aparecía en la leyenda) -- una fila por tramo visible con algo
   // realmente dibujado en esta vista, con su nombre de archivo y su
-  // propio color.
+  // propio color, y otra para su buffer si lo tiene (2026-09-25: el area
+  // de afeccion tampoco salia en la leyenda).
   const uploadLegendRows = [];
   for (const u of uploadedLayers) {
     if (!u.visible) continue;
-    const candidateIds = [`${u.id}-fill`, `${u.id}-line`, `${u.id}-point`].filter((id) => map.getLayer(id));
-    if (!candidateIds.length) continue;
-    const feats = map.queryRenderedFeatures({ layers: candidateIds });
-    if (feats.length === 0) continue;
-    uploadLegendRows.push({ fill: u.color, line: u.color, nombre: u.name.replace(/\.[^.]+$/, "") });
+    const trackIds = [`${u.id}-fill`, `${u.id}-line`, `${u.id}-point`].filter((id) => map.getLayer(id));
+    if (trackIds.length && map.queryRenderedFeatures({ layers: trackIds }).length > 0) {
+      uploadLegendRows.push({
+        fill: u.color,
+        line: u.color,
+        nombre: u.name.replace(/\.[^.]+$/, "").replace(/_+/g, " "),
+        swatch: uploadSwatchType(u),
+        lineWidthPx: u.lineWidth,
+      });
+    }
+    if (u.bufferMeters > 0) {
+      const bufferIds = [`${u.id}-buffer`, `${u.id}-buffer-line`].filter(
+        (id) => map.getLayer(id) && map.getLayoutProperty(id, "visibility") !== "none"
+      );
+      if (bufferIds.length && map.queryRenderedFeatures({ layers: bufferIds }).length > 0) {
+        uploadLegendRows.push({
+          fill: u.color,
+          line: u.color,
+          nombre: `Buffer ${bufferLabel(u.bufferMeters)}`,
+          swatch: "buffer",
+          bufferStyle: u.bufferStyle,
+          bufferOpacity: u.bufferOpacity,
+        });
+      }
+    }
   }
 
+  const grid = options.grid ? computeUtmGrid(mapW, mapH, dpr) : null;
+  const mainCorners = [[0, 0], [mapW / dpr, 0], [mapW / dpr, mapH / dpr], [0, mapH / dpr]].map((p) => map.unproject(p));
+  const mainCenter = map.getCenter();
+
   const dataUrl = map.getCanvas().toDataURL("image/png");
+
+  // El inset se captura con los grosores de linea todavia escalados para
+  // la exportacion (se restauran justo despues), asi los limites
+  // administrativos salen con el mismo criterio de grosor fisico que el
+  // mapa principal.
+  const inset = options.inset ? await captureInset(px(INSET_MM.w), px(INSET_MM.h), dpr, mainCenter, mainCorners) : null;
 
   for (const [id, original] of restoreTextSizes) {
     map.setLayoutProperty(id, "text-size", original);
@@ -285,7 +448,7 @@ async function captureMapAtScale(targetScaleN, mapW, mapH) {
   map.resize();
   map.jumpTo({ center: originalCenter, zoom: originalZoom, bearing: originalBearing, pitch: originalPitch });
 
-  return { dataUrl, renderedLayerIds, renderedFieldValues, renderedNames, uploadLegendRows };
+  return { dataUrl, renderedLayerIds, renderedFieldValues, renderedNames, uploadLegendRows, grid, inset };
 }
 
 // Cuantos nombres distintos como mucho se listan bajo cada fila de
@@ -335,11 +498,63 @@ function buildLegendRows(visibleLayers, renderedFieldValues, renderedNames) {
         fill: l.color.fill,
         line: l.color.line,
         nombre: l.nombre,
+        swatch: l.geom === "line" ? "line" : "fill",
         subtitle: legendNamesSubtitle(namesByVariant && namesByVariant.get("_all")),
       });
     }
   }
   return rows;
+}
+
+// Simbolo de una fila de leyenda: cuadrado relleno (poligono), trazo
+// (linea), circulo (punto) o recuadro discontinuo/relleno (buffer, segun
+// su estilo en upload.js) -- que el simbolo se parezca a lo que se ve en
+// el mapa, como en cualquier leyenda cartografica.
+function drawLegendSwatch(ctx, row, sx, sy, size) {
+  ctx.save();
+  const swatch = row.swatch || "fill";
+  if (swatch === "line") {
+    const w = row.lineWidthPx != null ? cssPxToOutputPx(row.lineWidthPx) : px(0.6);
+    ctx.strokeStyle = row.line;
+    ctx.lineWidth = Math.max(w, px(0.3));
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(sx, sy + size / 2);
+    ctx.lineTo(sx + size, sy + size / 2);
+    ctx.stroke();
+  } else if (swatch === "point") {
+    ctx.fillStyle = row.fill;
+    ctx.strokeStyle = "#fff";
+    ctx.lineWidth = px(0.4);
+    ctx.beginPath();
+    ctx.arc(sx + size / 2, sy + size / 2, size * 0.35, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  } else if (swatch === "buffer") {
+    const hasFill = row.bufferStyle === "relleno" || row.bufferStyle === "ambos";
+    const hasOutline = row.bufferStyle !== "relleno";
+    if (hasFill) {
+      ctx.globalAlpha = Math.max(row.bufferOpacity != null ? row.bufferOpacity : 0.3, 0.15);
+      ctx.fillStyle = row.fill;
+      ctx.fillRect(sx, sy, size, size);
+      ctx.globalAlpha = 1;
+    }
+    ctx.strokeStyle = row.line;
+    if (hasOutline) {
+      ctx.lineWidth = px(0.5);
+      ctx.setLineDash([px(1.2), px(0.8)]);
+    } else {
+      ctx.lineWidth = px(0.25);
+    }
+    ctx.strokeRect(sx, sy, size, size);
+  } else {
+    ctx.fillStyle = row.fill;
+    ctx.fillRect(sx, sy, size, size);
+    ctx.strokeStyle = row.line;
+    ctx.lineWidth = px(0.25);
+    ctx.strokeRect(sx, sy, size, size);
+  }
+  ctx.restore();
 }
 
 function drawScaleBar(ctx, x, y, scaleN) {
@@ -356,9 +571,10 @@ function drawScaleBar(ctx, x, y, scaleN) {
   const captionSize = px(3);
   const boxPad = px(4);
 
+  const box = { x: x - boxPad, y: y - px(11), w: barPx + boxPad * 2 + px(20), h: px(20) };
   ctx.save();
   ctx.fillStyle = "rgba(255,255,255,0.88)";
-  ctx.fillRect(x - boxPad, y - px(11), barPx + boxPad * 2 + px(20), px(20));
+  ctx.fillRect(box.x, box.y, box.w, box.h);
 
   ctx.strokeStyle = "#182C54";
   ctx.lineWidth = px(1);
@@ -380,6 +596,7 @@ function drawScaleBar(ctx, x, y, scaleN) {
   ctx.font = `${captionSize}px Arial`;
   ctx.fillText(`Escala 1:${scaleN.toLocaleString("es-ES")}`, x, y + px(9));
   ctx.restore();
+  return box;
 }
 
 // legendRows: array ya construido (buildLegendRows para las capas
@@ -418,11 +635,7 @@ function drawLegend(ctx, x, y, legendRows, maxHeight) {
     const row = legendRows[i];
     const thisRowH = rowHeights[i];
     if (rowY + thisRowH > y + height) break;
-    ctx.fillStyle = row.fill;
-    ctx.fillRect(x + padding, rowY + (rowH - swatchSize) / 2, swatchSize, swatchSize);
-    ctx.strokeStyle = row.line;
-    ctx.lineWidth = px(0.25);
-    ctx.strokeRect(x + padding, rowY + (rowH - swatchSize) / 2, swatchSize, swatchSize);
+    drawLegendSwatch(ctx, row, x + padding, rowY + (rowH - swatchSize) / 2, swatchSize);
 
     ctx.fillStyle = "#222";
     ctx.font = `${rowTextSize}px Arial`;
@@ -448,6 +661,143 @@ function drawLegend(ctx, x, y, legendRows, maxHeight) {
   return height;
 }
 
+// Donde cruza una polilinea la recta eje=valor (axis 0: x, 1: y) --
+// devuelve la otra coordenada, o null si no la cruza.
+function polylineCrossing(line, axis, value) {
+  const other = 1 - axis;
+  for (let i = 1; i < line.length; i++) {
+    const a = line[i - 1];
+    const b = line[i];
+    if (a[axis] === b[axis]) continue;
+    if ((a[axis] - value) * (b[axis] - value) <= 0) {
+      const t = (value - a[axis]) / (b[axis] - a[axis]);
+      return a[other] + (b[other] - a[other]) * t;
+    }
+  }
+  return null;
+}
+
+// Lineas de la cuadricula UTM. Se dibujan ANTES que leyenda, flecha,
+// escala e inset, para que estos queden por encima.
+function drawUtmGridLines(ctx, grid, mapW, mapH) {
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, 0, mapW, mapH);
+  ctx.clip();
+  const strokePolyline = (line) => {
+    ctx.beginPath();
+    line.forEach(([lx, ly], i) => (i ? ctx.lineTo(lx, ly) : ctx.moveTo(lx, ly)));
+    ctx.stroke();
+  };
+  // Doble trazo (oscuro debajo, claro encima): legible tanto sobre
+  // ortofoto como sobre mapa base claro.
+  for (const pass of [{ color: "rgba(0,0,0,0.35)", width: px(0.45) }, { color: "rgba(255,255,255,0.85)", width: px(0.2) }]) {
+    ctx.strokeStyle = pass.color;
+    ctx.lineWidth = pass.width;
+    for (const g of grid.eastings) strokePolyline(g.line);
+    for (const g of grid.northings) strokePolyline(g.line);
+  }
+  ctx.restore();
+}
+
+function rectsIntersect(a, b) {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+// Rotulos de coordenadas en el borde del mapa (E arriba y abajo, N a
+// izquierda y derecha). Se dibujan AL FINAL y se descarta cualquiera que
+// choque con un recuadro (leyenda, flecha, escala, inset): si se dibujaran
+// antes, quedarian medio tapados por esos recuadros -- visto en la primera
+// prueba de esta funcion, con "4.479.000" cortado por la leyenda.
+function drawUtmGridLabels(ctx, grid, mapW, mapH, avoidRects) {
+  ctx.save();
+  const fontSize = px(2.6);
+  ctx.font = `${fontSize}px Arial`;
+  ctx.fillStyle = "#182C54";
+  ctx.strokeStyle = "rgba(255,255,255,0.95)";
+  ctx.lineWidth = px(0.8);
+  ctx.lineJoin = "round";
+  const pad = px(0.8);
+  const label = (text, lx, ly, align, baseline) => {
+    const w = ctx.measureText(text).width;
+    const x0 = align === "center" ? lx - w / 2 : align === "right" ? lx - w : lx;
+    const y0 = baseline === "top" ? ly : baseline === "bottom" ? ly - fontSize : ly - fontSize / 2;
+    const rect = { x: x0 - pad, y: y0 - pad, w: w + pad * 2, h: fontSize + pad * 2 };
+    if (rect.x < 0 || rect.y < 0 || rect.x + rect.w > mapW || rect.y + rect.h > mapH) return;
+    if (avoidRects.some((r) => rectsIntersect(rect, r))) return;
+    ctx.textAlign = align;
+    ctx.textBaseline = baseline;
+    ctx.strokeText(text, lx, ly);
+    ctx.fillText(text, lx, ly);
+  };
+  const fmt = (v) => Math.round(v).toLocaleString("es-ES");
+  const edge = px(1.2);
+  for (const g of grid.eastings) {
+    const top = polylineCrossing(g.line, 1, 0);
+    const bottom = polylineCrossing(g.line, 1, mapH);
+    if (top != null) label(fmt(g.value), top, edge, "center", "top");
+    if (bottom != null) label(fmt(g.value), bottom, mapH - edge, "center", "bottom");
+  }
+  for (const g of grid.northings) {
+    const left = polylineCrossing(g.line, 0, 0);
+    const right = polylineCrossing(g.line, 0, mapW);
+    if (left != null) label(fmt(g.value), edge, left, "left", "middle");
+    if (right != null) label(fmt(g.value), mapW - edge, right, "right", "middle");
+  }
+  ctx.restore();
+}
+
+// Mapa de situacion: imagen del inset con un marco, la zona del mapa
+// principal marcada en rojo (o un punto si a esta escala queda demasiado
+// pequena para verse como recuadro) y el rotulo "Situación".
+function drawInset(ctx, insetImg, inset, x, y) {
+  const { w, h } = inset;
+  ctx.save();
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(x - px(1), y - px(1), w + px(2), h + px(2));
+  ctx.drawImage(insetImg, x, y, w, h);
+  ctx.strokeStyle = "#182C54";
+  ctx.lineWidth = px(0.4);
+  ctx.strokeRect(x, y, w, h);
+
+  ctx.beginPath();
+  ctx.rect(x, y, w, h);
+  ctx.clip();
+  const pts = inset.extentPx.map(([ex, ey]) => [x + ex, y + ey]);
+  const xs = pts.map((p) => p[0]);
+  const ys = pts.map((p) => p[1]);
+  const boxW = Math.max(...xs) - Math.min(...xs);
+  const boxH = Math.max(...ys) - Math.min(...ys);
+  ctx.strokeStyle = "#D50000";
+  ctx.fillStyle = "rgba(213,0,0,0.25)";
+  ctx.lineWidth = px(0.5);
+  if (boxW < px(3) || boxH < px(3)) {
+    const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
+    const cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+    ctx.beginPath();
+    ctx.arc(cx, cy, px(1.6), 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  } else {
+    ctx.beginPath();
+    pts.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])));
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  }
+
+  const titleSize = px(3);
+  ctx.font = `bold ${titleSize}px Arial`;
+  const title = "Situación";
+  const tw = ctx.measureText(title).width;
+  ctx.fillStyle = "rgba(255,255,255,0.9)";
+  ctx.fillRect(x, y, tw + px(3), titleSize + px(2));
+  ctx.fillStyle = "#182C54";
+  ctx.textBaseline = "top";
+  ctx.fillText(title, x + px(1.5), y + px(1));
+  ctx.restore();
+}
+
 async function drawNorthArrow(ctx, x, y, targetHeight) {
   try {
     const img = await loadImage("assets/NORTE.svg");
@@ -458,7 +808,10 @@ async function drawNorthArrow(ctx, x, y, targetHeight) {
   }
 }
 
-async function drawCajetin(ctx, x, y, width, height, title, subtitle) {
+// crsText: sistema de referencia a mostrar en el cajetin -- el de la
+// cuadricula UTM si se ha dibujado (ver computeUtmGrid), o el generico
+// del proyecto si no.
+async function drawCajetin(ctx, x, y, width, height, title, subtitle, crsText) {
   ctx.save();
   ctx.fillStyle = "#182C54";
   ctx.fillRect(x, y, width, height);
@@ -485,13 +838,15 @@ async function drawCajetin(ctx, x, y, width, height, title, subtitle) {
   ctx.textAlign = "right";
   ctx.font = `${Math.round(height * 0.14)}px Arial`;
   const fuente1 = "Elaboración propia a partir de MITECO / IGN";
-  const fuente2 = "ETRS89 / EPSG:4326 (visor) · EPSG:25830 (QGIS)";
+  const fuente2 = crsText || "ETRS89 / EPSG:4326 (visor) · EPSG:25830 (QGIS)";
   ctx.fillText(fuente1, x + width - px(6), y + height * 0.38);
   ctx.fillText(fuente2, x + width - px(6), y + height * 0.62);
   ctx.restore();
 }
 
-async function generateCartography(orientation, title, subtitle, scaleN) {
+// options: { grid: bool, inset: bool } -- checkboxes del modal de
+// exportacion (ambos activados por defecto).
+async function generateCartography(orientation, title, subtitle, scaleN, options = {}) {
   const totalMM = orientation === "horizontal"
     ? { w: A3_MM.w, h: A3_MM.h }
     : { w: A3_MM.h, h: A3_MM.w };
@@ -502,7 +857,8 @@ async function generateCartography(orientation, title, subtitle, scaleN) {
   const mapH = totalH - cajetinH;
   const mapW = totalW;
 
-  const { dataUrl, renderedLayerIds, renderedFieldValues, renderedNames, uploadLegendRows } = await captureMapAtScale(scaleN, mapW, mapH);
+  const { dataUrl, renderedLayerIds, renderedFieldValues, renderedNames, uploadLegendRows, grid, inset } =
+    await captureMapAtScale(scaleN, mapW, mapH, options);
   const mapImg = await loadImage(dataUrl);
 
   const canvas = document.createElement("canvas");
@@ -514,20 +870,37 @@ async function generateCartography(orientation, title, subtitle, scaleN) {
   ctx.fillRect(0, 0, totalW, totalH);
   ctx.drawImage(mapImg, 0, 0, mapW, mapH);
 
+  // Lineas de cuadricula primero (debajo de todo); sus rotulos al final,
+  // evitando los recuadros (ver drawUtmGridLabels).
+  if (grid) drawUtmGridLines(ctx, grid, mapW, mapH);
+
   const margin = px(8);
+  const avoidRects = [];
   const visibleLayers = LAYERS.filter((l) => renderedLayerIds.has(l.id));
   // Filas de las capas ambientales + una por cada tramo/punto subido
   // visible con algo dibujado en esta vista (idea de Francisco,
   // 2026-09-24: la línea del proyecto no salía en la leyenda).
   const legendRows = buildLegendRows(visibleLayers, renderedFieldValues, renderedNames).concat(uploadLegendRows);
-  drawLegend(ctx, margin, margin, legendRows, mapH - margin * 2);
+  const legendH = drawLegend(ctx, margin, margin, legendRows, mapH - margin * 2);
+  avoidRects.push({ x: margin, y: margin, w: px(75), h: legendH });
 
   const arrowSize = Math.round(totalW * 0.035);
   await drawNorthArrow(ctx, mapW - arrowSize - margin, margin, arrowSize);
+  avoidRects.push({ x: mapW - arrowSize - margin, y: margin, w: arrowSize, h: arrowSize });
 
-  drawScaleBar(ctx, margin, mapH - px(14), scaleN);
+  avoidRects.push(drawScaleBar(ctx, margin, mapH - px(14), scaleN));
 
-  await drawCajetin(ctx, 0, mapH, totalW, cajetinH, title, subtitle);
+  if (inset) {
+    const insetImg = await loadImage(inset.dataUrl);
+    const ix = mapW - margin - inset.w;
+    const iy = mapH - margin - inset.h;
+    drawInset(ctx, insetImg, inset, ix, iy);
+    avoidRects.push({ x: ix - px(1), y: iy - px(1), w: inset.w + px(2), h: inset.h + px(2) });
+  }
+
+  if (grid) drawUtmGridLabels(ctx, grid, mapW, mapH, avoidRects);
+
+  await drawCajetin(ctx, 0, mapH, totalW, cajetinH, title, subtitle, grid ? grid.crsLabel : null);
 
   return { canvas, totalMM };
 }
@@ -543,8 +916,12 @@ const exportPreview = document.getElementById("export-preview");
 const exportDownloadPng = document.getElementById("export-download-png");
 const exportDownloadPdf = document.getElementById("export-download-pdf");
 const exportScaleSelect = document.getElementById("export-scale");
+const exportInsetCheck = document.getElementById("export-inset");
+const exportGridCheck = document.getElementById("export-grid");
+const exportDownloadReport = document.getElementById("export-download-report");
+const exportReportNote = document.getElementById("export-report-note");
 
-let lastExport = null; // { canvas, totalMM }
+let lastExport = null; // { canvas, totalMM, meta: { title, subtitle, scaleN } }
 
 exportOpenBtn.addEventListener("click", () => {
   exportResult.hidden = true;
@@ -564,10 +941,21 @@ exportGenerateBtn.addEventListener("click", async () => {
   const subtitle = document.getElementById("export-subtitle").value.trim();
   const scaleN = Number(exportScaleSelect.value);
 
+  const options = { inset: exportInsetCheck.checked, grid: exportGridCheck.checked };
+
   exportOverlay.hidden = false;
   try {
-    lastExport = await generateCartography(orientation, title, subtitle, scaleN);
+    lastExport = await generateCartography(orientation, title, subtitle, scaleN, options);
+    lastExport.meta = { title, subtitle, scaleN };
     exportPreview.src = lastExport.canvas.toDataURL("image/png");
+    // El informe junta cartografia + tabla de afecciones: sin analisis
+    // previo no hay tabla que incluir, asi que se desactiva y se explica.
+    // lastAnalysisResults vive en analysis.js (cargado despues), pero
+    // esto solo se ejecuta al hacer clic, con todos los scripts ya
+    // cargados.
+    const hasAnalysis = typeof lastAnalysisResults !== "undefined" && lastAnalysisResults != null;
+    exportDownloadReport.disabled = !hasAnalysis;
+    exportReportNote.hidden = hasAnalysis;
     exportResult.hidden = false;
   } catch (e) {
     console.error(e);
@@ -600,4 +988,153 @@ exportDownloadPdf.addEventListener("click", () => {
   });
   pdf.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, totalMM.w, totalMM.h);
   pdf.save("geovisor_cartografia.pdf");
+});
+
+// --- Informe PDF unico: cartografia + tabla de afecciones ---
+//
+// Un solo archivo para adjuntar al expediente en vez de tres (plano PNG/PDF
+// + Excel + notas). Pagina 1: la cartografia A3 recien generada. Paginas
+// siguientes (A4 apaisado): la tabla de afecciones del ultimo analisis,
+// con el semaforo de sensibilidad coloreado, y las mismas notas de
+// metodologia que la hoja "Info" del Excel. Tabla con jspdf-autotable
+// (index.html) para que el texto quede seleccionable/buscable en el PDF,
+// no como imagen.
+
+function hexToRgb(hex) {
+  const h = hex.replace("#", "");
+  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+}
+
+const REPORT_BLUE = hexToRgb("#182C54");
+const REPORT_BAND = [242, 242, 242];
+
+function buildReportPdf() {
+  const { jsPDF } = window.jspdf;
+  const { canvas, totalMM, meta } = lastExport;
+  const { u, results } = lastAnalysisResults;
+
+  const pdf = new jsPDF({
+    orientation: totalMM.w > totalMM.h ? "landscape" : "portrait",
+    unit: "mm",
+    format: [totalMM.w, totalMM.h],
+  });
+  // JPEG en vez de PNG: la ortofoto comprime mucho mejor asi y el informe
+  // no pasa de ~15 MB a ~3 MB sin perdida apreciable a esta resolucion.
+  pdf.addImage(canvas.toDataURL("image/jpeg", 0.92), "JPEG", 0, 0, totalMM.w, totalMM.h);
+
+  pdf.addPage([297, 210], "landscape");
+  const pageW = 297;
+  const marginX = 12;
+
+  pdf.setFont("helvetica", "bold");
+  pdf.setFontSize(15);
+  pdf.setTextColor(...REPORT_BLUE);
+  pdf.text("Informe de afecciones ambientales", marginX, 16);
+
+  pdf.setFont("helvetica", "normal");
+  pdf.setFontSize(9);
+  pdf.setTextColor(70, 70, 70);
+  const proyecto = meta.subtitle ? `${meta.title} — ${meta.subtitle}` : meta.title;
+  pdf.text(
+    [
+      `Proyecto: ${proyecto}`,
+      `Tramo/punto analizado: ${u.name}  ·  Buffer por defecto: ${bufferLabel(u.bufferMeters)}  ·  Fecha: ${new Date().toLocaleDateString("es-ES")}`,
+    ],
+    marginX,
+    23
+  );
+
+  const rows = resultsToRows(u, results);
+  const body = rows.map((row) =>
+    row.map((v) => {
+      if (v === "" || v == null) return "-";
+      if (typeof v === "number") return v.toLocaleString("es-ES");
+      return String(v);
+    })
+  );
+
+  const drawFooter = () => {
+    const pageH = pdf.internal.pageSize.getHeight();
+    const w = pdf.internal.pageSize.getWidth();
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(7.5);
+    pdf.setTextColor(120, 120, 120);
+    pdf.text("Quadrante · Geovisor Ambiental · Estimación de cribado, no sustituye el análisis en QGIS", marginX, pageH - 8);
+    pdf.text(`Página ${pdf.internal.getNumberOfPages()}`, w - marginX, pageH - 8, { align: "right" });
+  };
+
+  if (body.length === 0) {
+    pdf.setFontSize(10);
+    pdf.setTextColor(70, 70, 70);
+    pdf.text("Sin afecciones ni elementos cercanos detectados en el análisis.", marginX, 36);
+    drawFooter();
+  } else {
+    pdf.autoTable({
+      head: [RESULTS_HEADER],
+      body,
+      startY: 32,
+      margin: { left: marginX, right: marginX, bottom: 16 },
+      styles: { fontSize: 7.5, cellPadding: 1.5, valign: "middle", lineColor: [220, 220, 220], lineWidth: 0.1 },
+      headStyles: { fillColor: REPORT_BLUE, textColor: 255, fontStyle: "bold" },
+      alternateRowStyles: { fillColor: REPORT_BAND },
+      columnStyles: {
+        0: { cellWidth: 22, halign: "center" },
+        1: { cellWidth: 11, halign: "center" },
+        2: { cellWidth: 38 },
+        3: { cellWidth: 32 },
+        6: { cellWidth: 55 },
+      },
+      didParseCell: (data) => {
+        if (data.section !== "body" || data.column.index !== 0) return;
+        const color = SENSITIVITY_COLOR[data.cell.raw];
+        if (!color) return;
+        data.cell.styles.fillColor = hexToRgb(color);
+        data.cell.styles.textColor = 255;
+        data.cell.styles.fontStyle = "bold";
+      },
+      didDrawPage: drawFooter,
+    });
+  }
+
+  // Notas de metodologia -- mismo contenido que la hoja "Info" del Excel.
+  const notes = [
+    ["Nota", "Estimación de cribado a partir de teselas vectoriales — no sustituye el análisis en QGIS."],
+    ["Buffer", "Algunas capas pueden usar un buffer distinto al del tramo — ver columna 'Buffer aplicado (m)'."],
+    ["Fuente y vigencia", "Cada capa indica su organismo de origen en la columna 'Fuente'. Confirmar la fecha de descarga vigente del catálogo con el equipo antes de una entrega final."],
+    ["Sensibilidad", "Criterio interno de Quadrante (Muy Alta/Alta/Media/Baja), no una clasificación reglamentaria — pensado para priorizar qué hallazgo revisar primero, no sustituye el criterio del técnico ambiental."],
+  ];
+  let y = (pdf.lastAutoTable ? pdf.lastAutoTable.finalY : 40) + 8;
+  const pageH = pdf.internal.pageSize.getHeight();
+  const textW = pageW - marginX * 2 - 32;
+  pdf.setFontSize(8);
+  for (const [label, text] of notes) {
+    const lines = pdf.splitTextToSize(text, textW);
+    const blockH = lines.length * 3.6 + 1.5;
+    if (y + blockH > pageH - 16) {
+      pdf.addPage([297, 210], "landscape");
+      drawFooter();
+      y = 18;
+    }
+    pdf.setFont("helvetica", "bold");
+    pdf.setTextColor(...REPORT_BLUE);
+    pdf.text(label, marginX, y);
+    pdf.setFont("helvetica", "normal");
+    pdf.setTextColor(70, 70, 70);
+    pdf.text(lines, marginX + 32, y);
+    y += blockH;
+  }
+
+  return pdf;
+}
+
+exportDownloadReport.addEventListener("click", () => {
+  if (!lastExport || typeof lastAnalysisResults === "undefined" || !lastAnalysisResults) return;
+  try {
+    const pdf = buildReportPdf();
+    const base = lastAnalysisResults.u.name.replace(/\.[^.]+$/, "");
+    pdf.save(`informe_afecciones_${base}.pdf`);
+  } catch (e) {
+    console.error(e);
+    alert("Error generando el informe: " + e.message);
+  }
 });
