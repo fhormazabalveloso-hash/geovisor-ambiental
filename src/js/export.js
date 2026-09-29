@@ -93,8 +93,109 @@ function cssPxToOutputPx(v) {
 // ancho cubren unos 175 km, suficiente para situar una provincia.
 const INSET_SCALE = 2500000;
 const INSET_MM = { w: 70, h: 52 };
+
+// Poligonos de provincia del inset (pipeline/build_situacion.py; sustituyen a
+// las lineas limite, retiradas del visor el 2026-09-29). Se cargan solo la
+// primera vez que se exporta con mapa de situacion, no al abrir el visor.
+// Con poligonos se puede resaltar la provincia del proyecto (y aclarar
+// su comunidad autonoma), cosa que las lineas sueltas no permitian.
+const SITUACION_URL = "../data-web/situacion_provincias.geojson";
+const SITUACION_SOURCE = "situacion-provincias";
+// Distancia maxima para asignar provincia cuando el centro del plano cae
+// fuera de todas (p. ej. en el mar, en una obra portuaria).
+const SITUACION_MAX_DIST_KM = 30;
 // Unicas capas (ademas del mapa base) que se dejan visibles en el inset.
-const INSET_CONTEXT_LAYER_IDS = ["limites_autonomicos-line", "limites_provinciales-line"];
+const INSET_CONTEXT_LAYER_IDS = [
+  "situacion-ccaa-fill",
+  "situacion-prov-fill",
+  "situacion-prov-line",
+  "situacion-prov-highlight-line",
+];
+let situacionData = null;
+
+// Anade (una vez por estilo: un cambio de mapa base las borra) la fuente y
+// las capas del inset, ocultas. Tiene que ocurrir ANTES de escalar los
+// grosores de linea para la exportacion (captureMapAtScale), para que las
+// lineas de provincia salgan con el mismo grosor fisico que el resto.
+async function ensureSituacionLayers() {
+  if (!situacionData) {
+    const res = await fetch(SITUACION_URL);
+    if (!res.ok) throw new Error(`No se pudo cargar ${SITUACION_URL} (${res.status})`);
+    situacionData = await res.json();
+  }
+  if (map.getSource(SITUACION_SOURCE)) return;
+  map.addSource(SITUACION_SOURCE, { type: "geojson", data: situacionData });
+  const hidden = { visibility: "none" };
+  const none = ["==", ["get", "prov"], ""];
+  map.addLayer({
+    id: "situacion-ccaa-fill",
+    type: "fill",
+    source: SITUACION_SOURCE,
+    layout: hidden,
+    filter: none,
+    paint: { "fill-color": "#FFFFFF", "fill-opacity": 0.28 },
+  });
+  map.addLayer({
+    id: "situacion-prov-fill",
+    type: "fill",
+    source: SITUACION_SOURCE,
+    layout: hidden,
+    filter: none,
+    paint: { "fill-color": "#FFFFFF", "fill-opacity": 0.55 },
+  });
+  map.addLayer({
+    id: "situacion-prov-line",
+    type: "line",
+    source: SITUACION_SOURCE,
+    layout: hidden,
+    paint: { "line-color": "#FFFFFF", "line-width": 0.8, "line-opacity": 0.9 },
+  });
+  map.addLayer({
+    id: "situacion-prov-highlight-line",
+    type: "line",
+    source: SITUACION_SOURCE,
+    layout: hidden,
+    filter: none,
+    paint: { "line-color": "#182C54", "line-width": 1.2 },
+  });
+}
+
+// Provincia (y comunidad) del punto dado: la que lo contiene o, si ninguna,
+// la mas cercana a menos de SITUACION_MAX_DIST_KM. Los poligonos estan
+// simplificados a ~400 m: cerca de un limite provincial puede elegir la
+// vecina, aceptable para rotular un mapa de situacion.
+function findProvincia(lng, lat) {
+  const pt = turf.point([lng, lat]);
+  for (const f of situacionData.features) {
+    if (turf.booleanPointInPolygon(pt, f)) return f.properties;
+  }
+  let best = null;
+  let bestKm = Infinity;
+  for (const f of situacionData.features) {
+    const boundary = turf.polygonToLine(f);
+    const parts = boundary.type === "FeatureCollection" ? boundary.features : [boundary];
+    for (const part of parts) {
+      const lines = part.geometry.type === "MultiLineString"
+        ? part.geometry.coordinates.map((c) => turf.lineString(c))
+        : [part];
+      for (const line of lines) {
+        const km = turf.pointToLineDistance(pt, line, { units: "kilometers" });
+        if (km < bestKm) {
+          bestKm = km;
+          best = f.properties;
+        }
+      }
+    }
+  }
+  return bestKm <= SITUACION_MAX_DIST_KM ? best : null;
+}
+
+// "Almería, Andalucía"; solo la comunidad si su nombre ya incluye el de la
+// provincia (uniprovinciales: "Comunidad de Madrid", "Cantabria"...).
+function provinciaLabel(p) {
+  if (!p) return null;
+  return p.ccaa.toLowerCase().includes(p.prov.toLowerCase()) ? p.ccaa : `${p.prov}, ${p.ccaa}`;
+}
 
 // Pasos de la cuadricula UTM, en metros -- se elige el menor que deje como
 // mucho ~6 lineas a lo ancho del mapa.
@@ -221,6 +322,12 @@ function computeUtmGrid(outW, outH, dpr) {
 // marcar en el inset que zona abarca.
 async function captureInset(insetW, insetH, dpr, center, mainCorners) {
   const mapEl = document.getElementById("map");
+  const provincia = findProvincia(center.lng, center.lat);
+  const provFilter = ["==", ["get", "prov"], provincia ? provincia.prov : ""];
+  map.setFilter("situacion-prov-fill", provFilter);
+  map.setFilter("situacion-prov-highlight-line", provFilter);
+  map.setFilter("situacion-ccaa-fill", ["all", ["==", ["get", "ccaa"], provincia ? provincia.ccaa : ""], ["!", provFilter]]);
+
   const prevVis = [];
   for (const layerDef of map.getStyle().layers) {
     if (layerDef.id === "basemap") continue;
@@ -249,7 +356,7 @@ async function captureInset(insetW, insetH, dpr, center, mainCorners) {
   const dataUrl = map.getCanvas().toDataURL("image/png");
 
   for (const [id, vis] of prevVis) map.setLayoutProperty(id, "visibility", vis);
-  return { dataUrl, extentPx, w: insetW, h: insetH };
+  return { dataUrl, extentPx, w: insetW, h: insetH, label: provinciaLabel(provincia) };
 }
 
 // Tipo de simbolo de leyenda para un tramo/punto subido segun su geometria.
@@ -321,6 +428,9 @@ async function captureMapAtScale(targetScaleN, mapW, mapH, options = {}) {
   // el contorno de poligono, el trazado subido, su propia opcion de
   // "Grosor de linea"...) -- generico en vez de listar IDs a mano, asi
   // cubre cualquier capa de linea presente sin mantenimiento aparte.
+  // Antes del escalado de grosores: ver ensureSituacionLayers.
+  if (options.inset) await ensureSituacionLayers();
+
   const lineWidthFactor = dpiScaleFactor(dpr);
   const restoreLineWidths = [];
   for (const layerDef of map.getStyle().layers) {
@@ -855,6 +965,20 @@ function drawInset(ctx, insetImg, inset, x, y) {
   ctx.fillStyle = "#182C54";
   ctx.textBaseline = "top";
   ctx.fillText(title, x + px(1.5), y + px(1));
+
+  // Provincia y comunidad del proyecto, abajo a la izquierda (ver
+  // findProvincia): la provincia va resaltada en el propio mapa.
+  if (inset.label) {
+    const labelSize = px(2.6);
+    ctx.font = `${labelSize}px Arial`;
+    const label = fitLegendText(ctx, inset.label, w - px(4));
+    const lw = Math.min(ctx.measureText(label).width, w - px(4));
+    const boxH = labelSize + px(2);
+    ctx.fillStyle = "rgba(255,255,255,0.9)";
+    ctx.fillRect(x, y + h - boxH, lw + px(3), boxH);
+    ctx.fillStyle = "#182C54";
+    ctx.fillText(label, x + px(1.5), y + h - boxH + px(1), w - px(4));
+  }
   ctx.restore();
 }
 

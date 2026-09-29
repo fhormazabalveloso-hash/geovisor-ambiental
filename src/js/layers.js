@@ -62,7 +62,7 @@
 const LAYERS = [
   {
     id: "red_natura_2000",
-    nombre: "Red Natura 2000 (ZEC + ZEPA)",
+    nombre: "Red Natura 2000",
     fuente: "MITECO / REDIAM",
     tematica: "espacios_protegidos",
     nivel: 1,
@@ -95,7 +95,7 @@ const LAYERS = [
   },
   {
     id: "enp",
-    nombre: "Espacios Naturales Protegidos (ENP)",
+    nombre: "Espacios naturales protegidos",
     fuente: "MITECO / REDIAM",
     sensitivityBase: "Alta",
     tematica: "espacios_protegidos",
@@ -109,7 +109,9 @@ const LAYERS = [
   },
   {
     id: "dph_deslindado",
-    nombre: "DPH deslindado",
+    // "deslindado" se mantiene a proposito: la capa solo trae los tramos con
+    // deslinde oficial, y sin la palabra se leeria como todo el DPH.
+    nombre: "Dominio público hidráulico deslindado",
     fuente: "CHG / confederaciones hidrográficas",
     sensitivityBase: "Media", // vinculante (Nivel 1), pero es un criterio hidrologico/dominio publico, no biodiversidad directa
     tematica: "hidrografia",
@@ -123,7 +125,7 @@ const LAYERS = [
   },
   {
     id: "iezh",
-    nombre: "Zonas Húmedas (IEZH)",
+    nombre: "Zonas húmedas",
     fuente: "MITECO",
     sensitivityBase: "Alta",
     tematica: "hidrografia",
@@ -137,7 +139,7 @@ const LAYERS = [
   },
   {
     id: "red_hidrografica",
-    nombre: "Red hidrográfica (Pfafstetter)",
+    nombre: "Red hidrográfica",
     fuente: "MITECO (Pfafstetter)",
     sensitivityBase: "Media", // ya es Nivel 2/estimado en el proyecto
     tematica: "hidrografia",
@@ -177,7 +179,7 @@ const LAYERS = [
   },
   {
     id: "vias_pecuarias",
-    nombre: "Vías Pecuarias (RGVP)",
+    nombre: "Vías pecuarias",
     fuente: "MITECO / REDIAM",
     sensitivityBase: "Media", // proteccion real, pero de otra naturaleza (servidumbre de paso/patrimonio) que la de un habitat
     tematica: "patrimonio_natural",
@@ -192,7 +194,7 @@ const LAYERS = [
   },
   {
     id: "iba",
-    nombre: "IBA - Áreas Importantes para las Aves",
+    nombre: "Áreas importantes para las aves",
     fuente: "SEO/BirdLife",
     tematica: "contexto",
     nivel: 3,
@@ -214,42 +216,12 @@ const LAYERS = [
     labelField: null, // el nombre vive en otra sub-tabla del GPKG de origen
     visibleByDefault: false,
   },
-  {
-    id: "limites_municipales",
-    nombre: "Límites municipales",
-    fuente: "CNIG",
-    tematica: "contexto",
-    nivel: 3,
-    sourceLayer: "reproj",
-    geom: "line",
-    color: { fill: "#BDBDBD", line: "#9E9E9E" }, // gris claro
-    labelField: null, // son lineas de limite, no poligonos de unidad -- etiquetar el borde no aporta
-    visibleByDefault: false,
-  },
-  {
-    id: "limites_provinciales",
-    nombre: "Límites provinciales",
-    fuente: "CNIG",
-    tematica: "contexto",
-    nivel: 3,
-    sourceLayer: "reproj",
-    geom: "line",
-    color: { fill: "#9E9E9E", line: "#757575" }, // gris medio
-    labelField: null,
-    visibleByDefault: false,
-  },
-  {
-    id: "limites_autonomicos",
-    nombre: "Límites autonómicos",
-    fuente: "CNIG",
-    tematica: "contexto",
-    nivel: 3,
-    sourceLayer: "reproj",
-    geom: "line",
-    color: { fill: "#616161", line: "#424242" }, // gris oscuro
-    labelField: null,
-    visibleByDefault: false,
-  },
+  // Las lineas limite municipales/provinciales/autonomicas se retiraron del
+  // visor (2026-09-29, decision de Francisco): aportaban poco sobre la
+  // ortofoto. El mapa de situacion de la cartografia usa ahora poligonos de
+  // provincia (data-web/situacion_provincias.geojson, generado por
+  // pipeline/build_situacion.py) -- ver captureInset en export.js. Los
+  // limites_*.pmtiles siguen en data-web/ por si se retoman.
 ];
 
 // Semaforo de sensibilidad (idea #1, ver nota junto a sensitivityBase mas

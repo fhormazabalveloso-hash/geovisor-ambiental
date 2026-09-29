@@ -547,6 +547,39 @@ Este documento se centra en el **Componente 1**.
   que devuelve una IA con este texto en
   `investigacion/ejemplos-de-uso/ejemplo-redaccion-ia-puerto.md`.
 
+- **2026-09-29 - Nombres de capa sencillos y mapa de situación con
+  polígonos** (pedido por Francisco).
+  - **Nombres:** sin siglas ni paréntesis que no aportan: "Red hidrográfica"
+    (antes "(Pfafstetter)"), "Red Natura 2000", "Espacios naturales
+    protegidos", "Zonas húmedas", "Vías pecuarias", "Áreas importantes para
+    las aves". "Dominio público hidráulico deslindado" conserva
+    "deslindado" a propósito: la capa solo trae los tramos con deslinde
+    oficial, y sin la palabra se leería como todo el DPH. Las siglas
+    técnicas siguen donde sirven: variantes ZEC/ZEPA de la leyenda y
+    columna "Fuente".
+  - **Panel de capas:** el nombre ocupa ahora la primera línea, con todo el
+    ancho, y la transparencia y los botones (Aa, subir/bajar) la segunda.
+    Compartiendo línea con los botones, el nombre solo tenía unos 110 px y
+    se cortaba ("Espacios natur…"). Al pasar el ratón se ven el nombre y la
+    fuente.
+  - **Líneas límite fuera del panel.** El mapa de situación usa polígonos de
+    provincia (`pipeline/build_situacion.py`, a partir de los recintos de la
+    BDDAE del IGN, simplificados a ~400 m, 709 KB, que se cargan solo al
+    exportar con mapa de situación). Resalta la provincia del proyecto,
+    aclara el resto de su comunidad y rotula "Almería, Andalucía" (solo la
+    comunidad si es uniprovincial: "Comunidad de Madrid"). Si el centro del
+    plano cae fuera de toda provincia (una obra en el mar), se elige la más
+    cercana a menos de 30 km.
+  - **Hueco en el origen:** la carpeta de recintos *provinciales* de Canarias
+    está vacía. Las dos provincias canarias se reconstruyen uniendo sus
+    municipios por el código de provincia de `NATCODE` (35 Las Palmas, 38
+    Santa Cruz de Tenerife).
+
+  Verificado: panel (nombres, encender, Aa, reordenar), mapa de situación
+  exportado en Carboneras (centro en el mar → Almería), y rótulos de
+  Madrid, Tenerife, Baleares, Ceuta, Cantabria, Valencia, Bizkaia, alta mar
+  y Portugal (los dos últimos sin rótulo, correcto).
+
 ---
 
 ## 3. Arquitectura objetivo
@@ -640,7 +673,18 @@ repositorio por si se retoma en el futuro con un origen de datos mejor.
 |---|---|---|
 | IBA - Áreas Importantes para las Aves | SEO/BirdLife | criterio científico, **no figura legal** |
 | Núcleos urbanos | CNIG | contexto |
-| Líneas límite municipales | CNIG | contexto |
+
+Las **líneas límite** municipales, provinciales y autonómicas se retiraron
+del visor (2026-09-29, decisión de Francisco). El mapa de situación de la
+cartografía usa en su lugar **polígonos de provincia**
+(`data-web/situacion_provincias.geojson`, generado con
+`pipeline/build_situacion.py`). Los `limites_*.pmtiles` siguen en
+`data-web/` por si se retoman.
+
+Los nombres de este catálogo son los técnicos del origen. En el visor, la
+leyenda y las exportaciones se usan nombres más sencillos (`nombre` en
+`src/js/layers.js`), p. ej. "Red hidrográfica" en vez de "Red hidrográfica
+(Pfafstetter)".
 
 ### Capas WMS de referencia (no locales, requieren conexión)
 
@@ -702,8 +746,10 @@ Formato de referencia (plano de localización real de Quadrante):
   (ej. *"Elaboración propia a partir de ADIF e IGN · ETRS89/UTM 30N ·
   EPSG:25830"*).
 - Elementos: flecha norte oficial (SVG en `assets/`), escala gráfica,
-  leyenda, mapa de situación (inset a 1:2.500.000 con límites
-  provinciales/autonómicos, implementado 2026-09-25) y cuadrícula UTM
+  leyenda, mapa de situación (inset a 1:2.500.000, implementado
+  2026-09-25; desde el 2026-09-29 con polígonos de provincia, la del
+  proyecto resaltada, su comunidad aclarada y rotulada "Provincia,
+  Comunidad") y cuadrícula UTM
   rotulada en el marco (ETRS89, o REGCAN95 en Canarias) - ambos
   opcionales desde el modal de exportación.
 - Color corporativo: **azul `#182C54`**.

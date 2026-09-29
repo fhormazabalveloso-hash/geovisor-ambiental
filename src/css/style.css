@@ -483,6 +483,30 @@ html, body {
   white-space: nowrap;
 }
 
+/* Panel de capas ambientales: nombre en la primera linea, con todo el ancho,
+   y controles (transparencia, Aa, subir/bajar) en la segunda -- ver
+   buildLayerPanel en main.js. El nombre puede pasar a una segunda linea en
+   vez de cortarse con "…": son nombres fijos y cortos, a diferencia de los
+   nombres de archivo del panel de tramos. */
+#layer-panel .layer-row-title .layer-name {
+  white-space: normal;
+  line-height: 1.2;
+}
+
+#layer-panel .layer-row-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 3px 0 0 20px;
+}
+
+#layer-panel .layer-row-controls .layer-opacity {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+  margin: 0;
+}
+
 .layer-order-btns {
   display: flex;
   gap: 2px;

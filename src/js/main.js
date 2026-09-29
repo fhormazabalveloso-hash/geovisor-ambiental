@@ -333,15 +333,20 @@ function buildLayerPanel() {
       const opacityPct = Math.round(layerOpacity[l.id] * 100);
       const disabledUp = i === 0 ? "disabled" : "";
       const disabledDown = i === capas.length - 1 ? "disabled" : "";
+      // Nombre en su propia linea (con todo el ancho) y los controles -- Aa,
+      // subir/bajar -- junto a la transparencia en la segunda: compartiendo
+      // linea con los botones, el nombre solo tenia ~110 px y se cortaba o
+      // partia en 3-4 lineas.
       html += `
         <div class="layer-row">
-          <div class="layer-row-main">
-            <label>
-              <input type="checkbox" class="layer-toggle" data-id="${l.id}" ${checked}>
-              ${swatchHtml(l)}
-              <span class="nivel-badge nivel-badge-${l.nivel}" title="${NIVEL_LABEL[l.nivel]}">${NIVEL_BADGE[l.nivel]}</span>
-              <span class="layer-name">${l.nombre}</span>
-            </label>
+          <label class="layer-row-title">
+            <input type="checkbox" class="layer-toggle" data-id="${l.id}" ${checked}>
+            ${swatchHtml(l)}
+            <span class="nivel-badge nivel-badge-${l.nivel}" title="${NIVEL_LABEL[l.nivel]}">${NIVEL_BADGE[l.nivel]}</span>
+            <span class="layer-name" title="${l.nombre} · ${l.fuente}">${l.nombre}</span>
+          </label>
+          <div class="layer-row-controls">
+            <input type="range" class="layer-opacity" data-id="${l.id}" min="0" max="100" value="${opacityPct}" title="Transparencia">
             <span class="layer-order-btns">
               ${l.labelField ? `<label class="label-toggle-btn" title="Mostrar/ocultar nombres">
                 <input type="checkbox" class="layer-label-toggle" data-id="${l.id}" ${labelVisible[l.id] ? "checked" : ""}>Aa
@@ -350,7 +355,6 @@ function buildLayerPanel() {
               <button class="layer-order-btn" data-id="${l.id}" data-dir="down" ${disabledDown} title="Dibujar más debajo">▼</button>
             </span>
           </div>
-          <input type="range" class="layer-opacity" data-id="${l.id}" min="0" max="100" value="${opacityPct}" title="Transparencia">
         </div>`;
     });
     html += `</div>`;
