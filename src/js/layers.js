@@ -59,7 +59,107 @@
 // referencia (limites, nucleos) que conviene ver por encima de los
 // rellenos de las demas capas.
 
+// wfs: capa EN LINEA, consultada en vivo al servicio WFS de MITECO (ver
+//        wfs-layers.js) en vez de teselada en data-web/. { typeName }. En el
+//        mapa se carga solo para la vista actual; en el analisis se pide
+//        directamente al servicio para el area de busqueda, sin depender de
+//        lo dibujado. Las geometrias vienen con 4 decimales (~10 m).
+
+// Zonas inundables del SNCZI (2026-09-29). Las primeras del array para que se
+// dibujen por DEBAJO del resto (son manchas grandes que taparian espacios
+// protegidos y rios); en el panel van en su propio grupo, despues de
+// hidrografia (ver TEMATICA_ORDER). Solo existen para los tramos estudiados
+// por el SNCZI -- ver ANALYSIS_FLOOD_COVERAGE_NOTE en analysis.js.
+const SNCZI_FUENTE = "MITECO - SNCZI (servicio en línea)";
+const FLOOD_LAYERS = [
+  {
+    id: "zi_costera_t500",
+    nombre: "Zona inundable costera T500",
+    fuente: SNCZI_FUENTE,
+    sensitivityBase: "Baja",
+    tematica: "inundabilidad",
+    nivel: 2,
+    geom: "polygon",
+    color: { fill: "#B2EBF2", line: "#4DB6C4" },
+    labelField: "zona",
+    idField: "id_zona",
+    wfs: { typeName: "costas:zim_laminas_q500" },
+    visibleByDefault: false,
+  },
+  {
+    id: "zi_costera_t100",
+    nombre: "Zona inundable costera T100",
+    fuente: SNCZI_FUENTE,
+    sensitivityBase: "Media",
+    tematica: "inundabilidad",
+    nivel: 2,
+    geom: "polygon",
+    color: { fill: "#00ACC1", line: "#00838F" },
+    labelField: "zona",
+    idField: "id_zona",
+    wfs: { typeName: "costas:zim_laminas_q100" },
+    visibleByDefault: false,
+  },
+  {
+    id: "zi_t500",
+    nombre: "Zona inundable T500",
+    fuente: SNCZI_FUENTE,
+    sensitivityBase: "Media", // zona inundable a efectos del RDPH (art. 14)
+    tematica: "inundabilidad",
+    nivel: 2,
+    geom: "polygon",
+    color: { fill: "#90CAF9", line: "#5C9BD5" },
+    labelField: "zona",
+    idField: "id_zona",
+    wfs: { typeName: "agua:Zi_laminas_q500" },
+    visibleByDefault: false,
+  },
+  {
+    id: "zi_t100",
+    nombre: "Zona inundable T100",
+    fuente: SNCZI_FUENTE,
+    sensitivityBase: "Media",
+    tematica: "inundabilidad",
+    nivel: 2,
+    geom: "polygon",
+    color: { fill: "#1E88E5", line: "#1565C0" },
+    labelField: "zona",
+    idField: "id_zona",
+    wfs: { typeName: "agua:Zi_laminas_q100" },
+    visibleByDefault: false,
+  },
+  {
+    id: "zi_t10",
+    nombre: "Zona inundable T10",
+    fuente: SNCZI_FUENTE,
+    sensitivityBase: "Alta", // alta probabilidad
+    tematica: "inundabilidad",
+    nivel: 2,
+    geom: "polygon",
+    color: { fill: "#283593", line: "#1A237E" },
+    labelField: "zona",
+    idField: "id_zona",
+    wfs: { typeName: "agua:Zi_laminas_q10" },
+    visibleByDefault: false,
+  },
+  {
+    id: "zi_zfp",
+    nombre: "Zona de flujo preferente",
+    fuente: SNCZI_FUENTE,
+    sensitivityBase: "Alta", // usos restringidos por el RDPH (art. 9 bis)
+    tematica: "inundabilidad",
+    nivel: 2,
+    geom: "polygon",
+    color: { fill: "#AD1457", line: "#880E4F" },
+    labelField: "zona",
+    idField: "id_zona",
+    wfs: { typeName: "agua:ZI_Laminas_ZFP" },
+    visibleByDefault: false,
+  },
+];
+
 const LAYERS = [
+  ...FLOOD_LAYERS,
   {
     id: "red_natura_2000",
     nombre: "Red Natura 2000",
@@ -254,11 +354,12 @@ const NIVEL_BADGE = {
 // agrupa por tematica de cara al usuario, con el nivel juridico como
 // metadato). "contexto" va el ultimo a proposito -- ver nota junto a
 // LAYERS sobre orden de dibujo.
-const TEMATICA_ORDER = ["espacios_protegidos", "hidrografia", "patrimonio_natural", "contexto"];
+const TEMATICA_ORDER = ["espacios_protegidos", "hidrografia", "inundabilidad", "patrimonio_natural", "contexto"];
 
 const TEMATICA_LABEL = {
   espacios_protegidos: "Espacios protegidos",
   hidrografia: "Hidrografía",
+  inundabilidad: "Zonas inundables (en línea)",
   patrimonio_natural: "Patrimonio natural",
   contexto: "Contexto",
 };

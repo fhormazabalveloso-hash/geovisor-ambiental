@@ -47,6 +47,37 @@ for (const l of LAYERS) layerVisible[l.id] = l.visibleByDefault;
 const labelVisible = {};
 for (const l of LAYERS) labelVisible[l.id] = true;
 
+// Datos ya descargados de las capas en linea (l.wfs, ver wfs-layers.js):
+// id de capa -> Map(id de elemento -> feature). Vive aqui, y no en
+// wfs-layers.js, porque buildStyle lo necesita para rellenar las fuentes
+// GeoJSON al reconstruir el estilo (cambio de mapa base, reordenar capas),
+// que si no volverian a salir vacias.
+const wfsData = {};
+for (const l of LAYERS) if (l.wfs) wfsData[l.id] = new Map();
+
+function wfsFeatureCollection(layerId) {
+  return { type: "FeatureCollection", features: [...wfsData[layerId].values()] };
+}
+
+// Un punto de etiqueta por elemento. Con la geometria del poligono como
+// fuente, MapLibre colocaria un nombre por cada trozo de tesela interna
+// (mismo problema que ya se resolvio en las capas teseladas, ver
+// "-label" mas abajo).
+function wfsLabelCollection(l) {
+  const features = [];
+  for (const f of wfsData[l.id].values()) {
+    if (!f.geometry) continue;
+    try {
+      const p = turf.pointOnFeature(f);
+      p.properties = { [l.labelField]: f.properties[l.labelField] };
+      features.push(p);
+    } catch (e) {
+      // geometria rara: sin etiqueta, el poligono se dibuja igual
+    }
+  }
+  return { type: "FeatureCollection", features };
+}
+
 // Color de una capa para fill-color/line-color. Si trae colorByField
 // (p. ej. TIPO en red_natura_2000 -- ver layers.js), devuelve una
 // expresion "match" que colorea cada feature segun ese campo; si no,
@@ -75,18 +106,27 @@ function buildStyle(basemapKey) {
 
   for (const l of LAYERS) {
     const sourceId = `src-${l.id}`;
-    sources[sourceId] = {
-      type: "vector",
-      url: `pmtiles://../data-web/${l.id}.pmtiles`,
-    };
-
-    // Fuente de puntos de etiqueta, separada del poligono/linea propios
-    // de la capa -- ver comentario junto a la capa "-label" mas abajo.
-    if (l.labelField) {
-      sources[`${sourceId}-labels`] = {
+    // Capa en linea: fuente GeoJSON que rellena wfs-layers.js con lo que
+    // descarga del servicio (y aqui con lo ya descargado, ver wfsData). Una
+    // fuente GeoJSON no lleva "source-layer".
+    const sourceLayerProp = l.wfs ? {} : { "source-layer": l.sourceLayer };
+    if (l.wfs) {
+      sources[sourceId] = { type: "geojson", data: wfsFeatureCollection(l.id) };
+      if (l.labelField) sources[`${sourceId}-labels`] = { type: "geojson", data: wfsLabelCollection(l) };
+    } else {
+      sources[sourceId] = {
         type: "vector",
-        url: `pmtiles://../data-web/${l.id}_labels.pmtiles`,
+        url: `pmtiles://../data-web/${l.id}.pmtiles`,
       };
+
+      // Fuente de puntos de etiqueta, separada del poligono/linea propios
+      // de la capa -- ver comentario junto a la capa "-label" mas abajo.
+      if (l.labelField) {
+        sources[`${sourceId}-labels`] = {
+          type: "vector",
+          url: `pmtiles://../data-web/${l.id}_labels.pmtiles`,
+        };
+      }
     }
 
     const visibility = layerVisible[l.id] ? "visible" : "none";
@@ -97,7 +137,7 @@ function buildStyle(basemapKey) {
         id: `${l.id}-fill`,
         type: "fill",
         source: sourceId,
-        "source-layer": l.sourceLayer,
+        ...sourceLayerProp,
         layout: { visibility },
         paint: { "fill-color": layerColorExpression(l, "fill"), "fill-opacity": opacity },
       });
@@ -105,7 +145,7 @@ function buildStyle(basemapKey) {
         id: `${l.id}-line`,
         type: "line",
         source: sourceId,
-        "source-layer": l.sourceLayer,
+        ...sourceLayerProp,
         layout: { visibility },
         paint: { "line-color": layerColorExpression(l, "line"), "line-width": 1, "line-opacity": opacity },
       });
@@ -114,7 +154,7 @@ function buildStyle(basemapKey) {
         id: `${l.id}-line`,
         type: "line",
         source: sourceId,
-        "source-layer": l.sourceLayer,
+        ...sourceLayerProp,
         layout: { visibility },
         paint: {
           "line-color": layerColorExpression(l, "line"),
@@ -139,7 +179,7 @@ function buildStyle(basemapKey) {
         // tesela, cuando la geometria aun no esta fragmentada), asi que
         // cada nombre aparece como mucho una vez por entidad visible.
         source: `${sourceId}-labels`,
-        "source-layer": "labels",
+        ...(l.wfs ? {} : { "source-layer": "labels" }),
         minzoom: 7,
         // Cuando hay demasiadas etiquetas candidatas compitiendo por el
         // mismo hueco (redes muy densas como la hidrografica), MapLibre
@@ -236,6 +276,8 @@ function setLayerVisible(l, visible) {
     if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", vis);
   }
   applyLabelVisibility(l);
+  // Capa en linea recien encendida: cargar la vista actual (wfs-layers.js).
+  if (l.wfs && visible && typeof scheduleWfsRefresh === "function") scheduleWfsRefresh();
 }
 
 function setLabelVisible(l, visible) {
@@ -343,7 +385,7 @@ function buildLayerPanel() {
             <input type="checkbox" class="layer-toggle" data-id="${l.id}" ${checked}>
             ${swatchHtml(l)}
             <span class="nivel-badge nivel-badge-${l.nivel}" title="${NIVEL_LABEL[l.nivel]}">${NIVEL_BADGE[l.nivel]}</span>
-            <span class="layer-name" title="${l.nombre} · ${l.fuente}">${l.nombre}</span>
+            <span class="layer-name" title="${l.nombre} · ${l.fuente}">${l.nombre}${l.wfs && typeof wfsStatusHtml === "function" ? wfsStatusHtml(l.id) : ""}</span>
           </label>
           <div class="layer-row-controls">
             <input type="range" class="layer-opacity" data-id="${l.id}" min="0" max="100" value="${opacityPct}" title="Transparencia">

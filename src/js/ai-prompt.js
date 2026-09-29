@@ -81,7 +81,8 @@ function aiDefaultProjectName(u) {
 function buildAiPrompt(u, results, meta, opts) {
   const hits = results.filter((r) => r.count > 0);
   const nearOnly = results.filter((r) => r.nearby.length > 0);
-  const clean = results.filter((r) => r.count === 0 && r.nearby.length === 0);
+  const clean = results.filter((r) => r.count === 0 && r.nearby.length === 0 && !r.serviceError);
+  const noData = results.filter((r) => r.serviceError);
   const workType = opts.workType || "Sin especificar";
 
   const lines = [];
@@ -144,6 +145,13 @@ function buildAiPrompt(u, results, meta, opts) {
 
   lines.push("", "CAPAS ANALIZADAS SIN HALLAZGOS");
   lines.push(clean.length ? `- ${clean.map((r) => `${r.layer.nombre} (buffer ${bufferLabel(r.bufferM)})`).join("; ")}.` : "- Ninguna.");
+  if (noData.length) {
+    lines.push(
+      "",
+      "CAPAS SIN DATOS (el servicio en línea no respondió; NO significa que no haya afección, dilo así)",
+      `- ${noData.map((r) => r.layer.nombre).join("; ")}.`
+    );
+  }
 
   lines.push(
     "",
@@ -151,7 +159,8 @@ function buildAiPrompt(u, results, meta, opts) {
     "- Nivel 1 = afección jurídica plena. Nivel 2 = afección estimada, con matiz metodológico (p. ej. la red hidrográfica con 100 m aproxima la zona de policía de cauces donde no hay deslinde).",
     "- La superficie indicada es la del elemento dentro del buffer, no solo bajo el trazado.",
     "- La sensibilidad es un criterio interno de Quadrante (Muy Alta/Alta/Media/Baja) para priorizar, no una clasificación reglamentaria.",
-    `- Cobertura: ${ANALYSIS_COVERAGE_NOTE}`
+    `- Cobertura: ${ANALYSIS_COVERAGE_NOTE}`,
+    `- Zonas inundables: ${ANALYSIS_FLOOD_COVERAGE_NOTE}`
   );
   if (meta && meta.incomplete) {
     lines.push(`- AVISO: ${ANALYSIS_INCOMPLETE_NOTE}`);

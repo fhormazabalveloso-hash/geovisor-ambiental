@@ -425,6 +425,10 @@ async function captureMapAtScale(targetScaleN, mapW, mapH, options = {}) {
   // cubre cualquier capa de linea presente sin mantenimiento aparte.
   // Antes del escalado de grosores: ver ensureSituacionLayers.
   if (options.inset) await ensureSituacionLayers();
+  // Capas en linea visibles (zonas inundables): cargar el encuadre que se
+  // va a exportar, que puede ser mas grande que la vista de pantalla. Si el
+  // servicio falla, la capa sale sin elementos y su fila en el panel lo dice.
+  await refreshWfsForView();
 
   const lineWidthFactor = dpiScaleFactor(dpr);
   const restoreLineWidths = [];
@@ -446,7 +450,9 @@ async function captureMapAtScale(targetScaleN, mapW, mapH, options = {}) {
     map.once("idle", () => resolve("idle"));
     setTimeout(() => resolve("timeout"), ANALYSIS_IDLE_TIMEOUT_MS);
   });
-  const incomplete = waitOutcome !== "idle";
+  // Tambien "incompleta" si una capa en linea visible no se pudo cargar.
+  const wfsFailed = LAYERS.some((l) => l.wfs && layerVisible[l.id] && ["error", "zoom"].includes(wfsStatus[l.id].state));
+  const incomplete = waitOutcome !== "idle" || wfsFailed;
   // Margen extra: la colocacion final de las etiquetas de texto (symbol
   // layers) puede terminar un poco despues del evento "idle".
   await new Promise((resolve) => setTimeout(resolve, 500));
@@ -1227,11 +1233,16 @@ function buildReportPdf() {
 
   // Resultado posiblemente incompleto (ver analyzeUploadedLayer): aviso
   // bien visible antes de la tabla, no solo en las notas del final.
+  // Igual para una capa en linea que no se pudo consultar (serviceErrorsText
+  // en analysis.js): queda sin resultado y tiene que verse antes de la tabla.
   let tableStartY = 32;
-  if (analysisMeta.incomplete) {
+  const avisos = [];
+  if (analysisMeta.incomplete) avisos.push(ANALYSIS_INCOMPLETE_NOTE);
+  if (serviceErrorsText(analysisMeta)) avisos.push(serviceErrorsText(analysisMeta));
+  if (avisos.length) {
     pdf.setFont("helvetica", "bold");
     pdf.setTextColor(183, 28, 28);
-    const lines = pdf.splitTextToSize(`AVISO: ${ANALYSIS_INCOMPLETE_NOTE}`, pageW - marginX * 2);
+    const lines = pdf.splitTextToSize(avisos.map((a) => `AVISO: ${a}`).join("\n"), pageW - marginX * 2);
     pdf.text(lines, marginX, 32);
     tableStartY = 32 + lines.length * 4 + 2;
   }

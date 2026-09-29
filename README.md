@@ -606,6 +606,54 @@ Este documento se centra en el **Componente 1**.
   en distancias; Manzanares 507 m de río en vez de 500 m, porque el método
   antiguo redondeaba a trozos de 10 m).
 
+- **2026-09-29 - Zonas inundables del SNCZI en línea** (pedido por
+  Francisco: probarlas en vivo y ver sus limitaciones). Seis capas nuevas
+  en el grupo "Zonas inundables (en línea)": **zona de flujo preferente,
+  T10, T100, T500** (fluviales) y **costera T100 / T500** (origen marino).
+  Se consultan al WFS de MITECO (`https://gis.miteco.gob.es/geoserver/wfs`,
+  capas `agua:ZI_Laminas_ZFP`, `agua:Zi_laminas_q10/q100/q500`,
+  `costas:zim_laminas_q100/q500`) en vez de teselarlas. Sustituyen a 3 de
+  las 5 capas grandes pendientes (láminas de 1-1,9 GB cada una).
+  - **Cómo funciona** (`src/js/wfs-layers.js`, `l.wfs` en `layers.js`): en
+    el mapa se cargan solo para la vista actual, al mover el mapa y solo si
+    la vista mide menos de 60 km de diagonal. En el panel se ve el estado:
+    "En línea · MITECO", "Cargando…", "Acerca el mapa", "Servicio no
+    disponible". En el **análisis** se piden directamente al servicio para
+    el área de búsqueda, en paralelo con la carga del mapa: no dependen de
+    lo dibujado. En la exportación se cargan para el encuadre del plano.
+  - **Si el servicio falla**, la capa queda **SIN RESULTADO**, nunca como
+    "sin afecciones", con aviso en el modal, el Excel, el informe y el
+    texto para la IA ("CAPAS SIN DATOS"). Probado simulando una caída.
+  - **Probado:** carretera de Córdoba (Guadalquivir: T10 15,5 ha ≤ T100
+    16,6 ha ≤ T500 32,1 ha; zona de flujo preferente 16,4 ha), Manzanares
+    (T500 1,93 ha, zona de flujo preferente 0,73 ha, T10 0,38 ha) y
+    Carboneras (costera "Carboneras (56-a)"). El análisis de 58 km sigue en
+    ~5 s. Cartografía exportada con las zonas en la leyenda y dibujadas por
+    debajo del resto de capas.
+  - **Limitaciones medidas:**
+    1. **Cobertura:** solo hay zona donde el SNCZI hizo el estudio (sobre
+       todo las ARPSI). En la carretera de 58 km, de 22 cauces con nombre
+       solo el Guadalquivir tenía zona. Se avisa en cada resultado
+       (`ANALYSIS_FLOOD_COVERAGE_NOTE`).
+    2. **Peso:** cada elemento es la zona entera de un tramo estudiado
+       (Guadalquivir en Córdoba: ~0,5 MB). La carretera de 58 km son ~0,7
+       MB por capa. Por eso el límite de vista de 60 km.
+    3. **Precisión:** coordenadas con 4 decimales (~10 m).
+    4. **Dependencia del servicio:** sin conexión o con MITECO caído, no hay
+       dato (avisado, ver arriba). CORS abierto (`*`), 0,1-0,3 s por
+       consulta y máximo de 1.000.000 de elementos por petición en el
+       servidor (usamos 500).
+    5. **Nombres:** algunas demarcaciones anteponen el código del tramo
+       ("ES030-12-04-1-01 Río Manzanares"). Se quita para mostrarlo; el
+       código queda en `id_zona`.
+  - **Hallazgo extra en el mismo servidor, también abierto:**
+    `costas:dominio_publico_maritimo_terrestre` (líneas de deslinde con
+    expediente, municipio, estado y orden ministerial),
+    `costas:Servidumbre_Proteccion` y, en `evaluacionambiental`, los
+    indicadores de la zonificación ambiental para renovables y los mapas
+    estratégicos de ruido. El DPMT cubriría el hueco de datos para puertos
+    con el mismo mecanismo.
+
 ---
 
 ## 3. Arquitectura objetivo
@@ -925,10 +973,11 @@ sigue saliendo de QGIS**; el visor acelera el paso previo (análisis + datos).
       río Manzanares, más un proyecto real de Francisco. Los fallos que
       salieron se corrigieron (ver las entradas del 24 y 25/09).
       Documentado en `investigacion/ejemplos-de-uso/`.
-- [ ] Generar las 5 capas grandes pendientes (inundabilidad T10/T100/T500,
-      DPH cartográfico probable, montes de utilidad pública) - **dejado
-      para el final** (decisión 2026-09-23), no bloquea nada más del
-      proyecto
+- [ ] Generar las capas grandes pendientes - **dejado para el final**
+      (decisión 2026-09-23), no bloquea nada más del proyecto. Desde el
+      2026-09-29 quedan 2 de 5: DPH cartográfico probable y montes de
+      utilidad pública. Las 3 de inundabilidad (T10/T100/T500) se resolvieron
+      con el servicio en línea del SNCZI (ver §2).
 - [x] Decidir cuenta de GitHub para el push → **cuenta personal**
       (`fhormazabalveloso-hash`), confirmado 2026-09-21: todo el
       contenido del repo es información pública, no hace falta esperar a
@@ -1030,6 +1079,13 @@ sigue saliendo de QGIS**; el visor acelera el paso previo (análisis + datos).
       ni clave de API (ver §2). Pendiente de decidir con Quadrante qué
       herramientas de IA se autorizan con datos de licitación y si merece la
       pena integrar la llamada directa.
+- [x] Zonas inundables del SNCZI en línea (2026-09-29): zona de flujo
+      preferente, T10/T100/T500 y costeras T100/T500, consultadas al WFS de
+      MITECO. Sustituyen a las 3 láminas grandes pendientes (ver §2).
+- [ ] Dominio Público Marítimo-Terrestre en línea: localizado en el mismo
+      servidor (`costas:dominio_publico_maritimo_terrestre`, líneas de
+      deslinde), probado desde el navegador; falta integrarlo con el mismo
+      mecanismo que las zonas inundables (2026-09-29).
 - [ ] Capas para obra marítima: Dominio Público Marítimo-Terrestre
       (deslinde de Costas) y hábitats marinos / posidonia (idea 10 de la
       ronda 2, EMODnet). Hoy es un hueco de datos, avisado en cada

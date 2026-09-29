@@ -101,7 +101,7 @@
 
         <div id="export-result" hidden>
           <img id="export-preview" alt="Vista previa de la cartografía exportada">
-          <p id="export-incomplete-note" class="modal-note analysis-incomplete-note" hidden>⚠️ Puede que alguna capa no terminara de cargar a tiempo (conexión lenta) y falte en esta cartografía. Revisa la vista previa o vuelve a generarla.</p>
+          <p id="export-incomplete-note" class="modal-note analysis-incomplete-note" hidden>⚠️ Puede que alguna capa no terminara de cargar a tiempo (conexión lenta o servicio en línea de MITECO no disponible) y falte en esta cartografía. Revisa la vista previa o vuelve a generarla.</p>
           <div class="modal-actions">
             <button id="export-download-png">Descargar PNG</button>
             <button id="export-download-pdf">Descargar PDF</button>
@@ -190,6 +190,7 @@
   <script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
   <script src="js/layers.js"></script>
   <script src="js/main.js"></script>
+  <script src="js/wfs-layers.js"></script>
   <script src="js/export.js"></script>
   <script src="js/upload.js"></script>
   <script src="js/analysis.js"></script>

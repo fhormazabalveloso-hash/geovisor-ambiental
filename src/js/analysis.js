@@ -61,6 +61,19 @@ const ANALYSIS_INCOMPLETE_NOTE =
 const ANALYSIS_COVERAGE_NOTE =
   "El catálogo todavía no incluye el Dominio Público Marítimo-Terrestre (deslinde de Costas) ni hábitats marinos como la posidonia. En obras de costa o mar, que no salgan afecciones no las descarta.";
 
+// Las zonas inundables del SNCZI (capas en linea, ver wfs-layers.js) solo
+// existen donde se ha hecho el estudio: en la carretera de prueba de 58 km
+// por Sierra Morena cruzaban 22 cauces con nombre y solo el Guadalquivir
+// tenia zona inundable.
+const ANALYSIS_FLOOD_COVERAGE_NOTE =
+  "Las zonas inundables del SNCZI solo existen para los tramos de río y de costa estudiados (sobre todo las áreas de riesgo potencial significativo, ARPSI). Que un cauce no tenga zona inundable no significa que no sea inundable: puede que no se haya estudiado.";
+
+function serviceErrorsText(meta) {
+  if (!meta || !meta.serviceErrors || meta.serviceErrors.length === 0) return "";
+  const capas = meta.serviceErrors.map((e) => `${e.nombre} (${e.error})`).join("; ");
+  return `No se pudo consultar el servicio en línea de MITECO para: ${capas}. Esas capas quedan SIN RESULTADO, lo que no significa que no haya afección. Repite el análisis más tarde.`;
+}
+
 // Estados posibles de la verificacion en campo de un hallazgo (idea #6 de
 // investigacion/ideas-mejora-geovisores-referencia.md) -- el primero es el
 // valor por defecto (sin confirmar todavia).
@@ -488,6 +501,26 @@ async function analyzeUploadedLayer(u, overrides = {}) {
       if (!layerVisible[l.id]) setLayerVisible(l, true);
     }
 
+    // Capas en linea (zonas inundables, ver wfs-layers.js): se piden al
+    // servicio para el area de busqueda, en paralelo con la espera de abajo.
+    // No dependen de lo dibujado, asi que no les afecta el tope de espera; si
+    // el servicio falla, la capa queda marcada como SIN RESULTADO, nunca
+    // como "sin afecciones".
+    const wfsResults = {};
+    const searchBbox = turf.bbox(searchPolygon);
+    const wfsPromise = Promise.all(
+      targetLayers.filter((l) => l.wfs).map(async (l) => {
+        try {
+          const r = await fetchWfsFeatures(l, searchBbox);
+          storeWfsFeatures(l, r.features);
+          wfsResults[l.id] = { features: r.features, truncated: r.truncated, error: null };
+        } catch (e) {
+          console.warn(`Capa en línea ${l.id}:`, e);
+          wfsResults[l.id] = { features: [], truncated: false, error: e.message };
+        }
+      })
+    );
+
     // triggerRepaint: sin cambios de camara ni de capas no habria fotograma
     // nuevo y "idle" no volveria a dispararse, y se agotaria el tope aunque
     // todo estuviera ya dibujado.
@@ -501,6 +534,7 @@ async function analyzeUploadedLayer(u, overrides = {}) {
     // dar resultados distintos (caso de prueba del puerto de Carboneras,
     // §4.1) -- ahora se avisa en el modal, el Excel y el informe.
     const incomplete = waitOutcome !== "idle";
+    await wfsPromise;
 
     const distCtx = buildDistanceContext(sampleTrazadoPoints(u.geojson, NEAREST_SAMPLE_KM));
 
@@ -523,8 +557,9 @@ async function analyzeUploadedLayer(u, overrides = {}) {
       // base de la capa -- ver nota junto a sensitivityBase en layers.js.
       let hasTipoC = false;
 
+      const wfsResult = l.wfs ? wfsResults[l.id] : null;
       if (existing.length) {
-        const feats = map.queryRenderedFeatures(undefined, { layers: existing });
+        const feats = wfsResult ? wfsResult.features : map.queryRenderedFeatures(undefined, { layers: existing });
         const intersecting = feats.filter((f) => f.geometry && turf.booleanIntersects(f, bufferPolygon));
 
         if (l.id === "red_natura_2000") {
@@ -633,6 +668,9 @@ async function analyzeUploadedLayer(u, overrides = {}) {
       results.push({
         layer: l, count, totalHa, totalM, names: [...names].sort(), nearby, nearestM, nearestName,
         bufferM: layerBufferM, sensitivity, nearSensitivity,
+        // Capa en linea que no se pudo consultar: sin resultado (no "cero").
+        serviceError: wfsResult ? wfsResult.error : null,
+        truncated: wfsResult ? wfsResult.truncated : false,
       });
     }
 
@@ -707,7 +745,11 @@ async function analyzeUploadedLayer(u, overrides = {}) {
 
     u.layerBufferOverrides = overrides;
     u.autoActivatedLayers = autoActivated;
-    showAnalysisResults(u, results, { incomplete });
+    showAnalysisResults(u, results, {
+      incomplete,
+      serviceErrors: results.filter((r) => r.serviceError).map((r) => ({ nombre: r.layer.nombre, error: r.serviceError })),
+      truncated: results.filter((r) => r.truncated).map((r) => r.layer.nombre),
+    });
   } catch (e) {
     console.error(e);
     alert("Error analizando afecciones: " + e.message);
@@ -764,9 +806,15 @@ function showAnalysisResults(u, results, meta = {}) {
 
   const container = document.getElementById("analysis-results");
 
+  const serviceErrors = serviceErrorsText(meta);
+  const truncatedText = meta.truncated && meta.truncated.length
+    ? `El servicio en línea devolvió el máximo de ${WFS_MAX_FEATURES} elementos para: ${meta.truncated.join(", ")}. Puede faltar alguno; analiza el trazado por tramos.`
+    : "";
   const warningsHtml =
     (meta.incomplete ? `<p class="modal-note analysis-incomplete-note">⚠️ ${escapeHtml(ANALYSIS_INCOMPLETE_NOTE)}</p>` : "") +
-    `<p class="modal-note analysis-coverage-note">ℹ️ ${escapeHtml(ANALYSIS_COVERAGE_NOTE)}</p>`;
+    (serviceErrors ? `<p class="modal-note analysis-incomplete-note">⚠️ ${escapeHtml(serviceErrors)}</p>` : "") +
+    (truncatedText ? `<p class="modal-note analysis-incomplete-note">⚠️ ${escapeHtml(truncatedText)}</p>` : "") +
+    `<p class="modal-note analysis-coverage-note">ℹ️ ${escapeHtml(ANALYSIS_COVERAGE_NOTE)} ${escapeHtml(ANALYSIS_FLOOD_COVERAGE_NOTE)}</p>`;
 
   // Aviso de transparencia: que capas se acaban de activar en el panel
   // porque tuvieron cruce directo (ver el bloque "autoActivated" en
@@ -918,11 +966,17 @@ function resultsToRows(u, results) {
 function analysisNotes(u, meta = {}) {
   const notes = [];
   if (meta.incomplete) notes.push(["AVISO", ANALYSIS_INCOMPLETE_NOTE]);
+  const serviceErrors = serviceErrorsText(meta);
+  if (serviceErrors) notes.push(["AVISO", serviceErrors]);
+  if (meta.truncated && meta.truncated.length) {
+    notes.push(["AVISO", `El servicio en línea devolvió el máximo de ${WFS_MAX_FEATURES} elementos para: ${meta.truncated.join(", ")}. Puede faltar alguno.`]);
+  }
   notes.push(
     ["Nota", "Estimación de cribado a partir de teselas vectoriales — no sustituye el análisis en QGIS."],
     ["Buffer", `Buffer por defecto del tramo: ${bufferLabel(u.bufferMeters)}. Algunas capas pueden usar uno distinto — ver columna 'Buffer aplicado (m)'.`],
     ["Cercanos", `Elementos fuera del buffer hasta ${NEAREST_SEARCH_MARGIN_M / 1000} km más allá de él (como mucho ${NEARBY_MAX_PER_LAYER} por capa). La distancia se mide desde el trazado; se marca "AL BORDE DEL BUFFER" si queda a menos de 50 m o del 10 % del buffer fuera de su borde.`],
     ["Cobertura", ANALYSIS_COVERAGE_NOTE],
+    ["Zonas inundables", `${ANALYSIS_FLOOD_COVERAGE_NOTE} Se consultan en vivo al servicio del SNCZI (MITECO) en el momento del análisis; geometría con precisión de ~10 m.`],
     ["Fuente y vigencia", "Cada capa indica su organismo de origen en la columna 'Fuente'. Confirmar la fecha de descarga vigente del catálogo con el equipo antes de una entrega final."],
     ["Sensibilidad", "Criterio interno de Quadrante (Muy Alta/Alta/Media/Baja), no una clasificación reglamentaria — pensado para priorizar qué hallazgo revisar primero, no sustituye el criterio del técnico ambiental."]
   );
