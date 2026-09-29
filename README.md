@@ -516,6 +516,37 @@ Este documento se centra en el **Componente 1**.
   (modal, CSV/Excel, cartografía PNG e informe PDF revisados), sin errores
   nuevos en consola.
 
+- **2026-09-29 - "Redactar con IA" (redacción asistida del apartado
+  ambiental).** Nuevo botón en el modal de resultados del análisis
+  (`src/js/ai-prompt.js`). Genera un texto con instrucciones y con los
+  resultados del último análisis, listo para pegar en la herramienta de IA
+  que use la empresa (Claude, Copilot…) y obtener un borrador del apartado
+  "Condicionantes ambientales" de una oferta. Decisiones:
+  - **El visor no llama a ninguna IA ni envía datos.** Solo arma el texto,
+    lo muestra entero en pantalla (se ve qué se va a compartir) y lo copia
+    al portapapeles. Así no hace falta servidor ni clave de API: el visor es
+    estático y el repo público, y una clave en el código quedaría expuesta.
+    Se valoraron otras dos opciones: clave propia de cada usuario y llamada
+    directa, o un intermediario en la nube con la clave de la empresa. Se
+    dejan para después, si la función resulta útil. La ventana avisa de que
+    el texto contiene datos de la licitación y solo debe usarse en
+    herramientas autorizadas por Quadrante.
+  - **La IA solo redacta.** Cifras, nombres y distancias salen del análisis
+    determinista. Las instrucciones le prohíben añadir datos o normativa
+    propios (lo normativo va como "[VERIFICAR: …]") y le piden mencionar los
+    elementos "al borde del buffer", tratar como tales los hallazgos
+    descartados en campo y, en obras de costa o mar, avisar de que faltan el
+    Dominio Público Marítimo-Terrestre y los hábitats marinos.
+  - Campos editables: nombre del proyecto (por defecto, el título del mapa
+    o el nombre del archivo) y tipo de obra. Se recuerdan por tramo al
+    recalcular.
+
+  Verificado: botón y ventana con clics reales, texto completo revisado,
+  copia comprobada en el portapapeles de Windows y casos límite (sin
+  hallazgos, análisis incompleto, polígono + puntos). Ejemplo del borrador
+  que devuelve una IA con este texto en
+  `investigacion/ejemplos-de-uso/ejemplo-redaccion-ia-puerto.md`.
+
 ---
 
 ## 3. Arquitectura objetivo
@@ -922,6 +953,11 @@ sigue saliendo de QGIS**; el visor acelera el paso previo (análisis + datos).
       análisis, las exportaciones y la cartografía, más el fallo de subida
       con el estilo aún cargando (ver §2 y
       `investigacion/ejemplos-de-uso/caso-puerto-dique-carboneras.md`).
+- [x] "Redactar con IA" (2026-09-29): texto para pegar en una herramienta de
+      IA y obtener un borrador del apartado ambiental. Sin llamadas externas
+      ni clave de API (ver §2). Pendiente de decidir con Quadrante qué
+      herramientas de IA se autorizan con datos de licitación y si merece la
+      pena integrar la llamada directa.
 - [ ] Capas para obra marítima: Dominio Público Marítimo-Terrestre
       (deslinde de Costas) y hábitats marinos / posidonia (idea 10 de la
       ronda 2, EMODnet). Hoy es un hueco de datos, avisado en cada

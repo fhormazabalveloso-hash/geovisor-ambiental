@@ -837,6 +837,87 @@ html, body {
   margin-top: 8px;
 }
 
+/* --- Modal "Redactar con IA" (ai-prompt.js): por encima del modal de
+   analisis, desde el que se abre --- */
+#ai-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#ai-modal-backdrop[hidden] {
+  display: none;
+}
+
+#ai-modal {
+  background: #fff;
+  border-radius: 8px;
+  padding: 20px 24px;
+  width: 680px;
+  max-width: 92vw;
+  max-height: 88vh;
+  overflow-y: auto;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+#ai-modal h2 {
+  margin: 0 0 8px;
+  font-size: 16px;
+  color: var(--quadrante-blue);
+}
+
+#ai-modal .modal-note {
+  margin-bottom: 8px;
+}
+
+.ai-privacy-note {
+  color: #8D5A00;
+}
+
+.ai-fields {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+#ai-prompt-text {
+  display: block;
+  width: 100%;
+  height: 300px;
+  margin-top: 4px;
+  padding: 8px;
+  box-sizing: border-box;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  font: 12px/1.45 Consolas, "Courier New", monospace;
+  font-weight: 400;
+  color: #333;
+  background: #FAFBFC;
+  resize: vertical;
+  white-space: pre-wrap;
+}
+
+#ai-copy-status {
+  margin-right: auto;
+  align-self: center;
+  font-size: 12px;
+}
+
+#ai-copy-status.ok {
+  color: #2E7D32;
+  font-weight: 600;
+}
+
+#ai-copy-status.error {
+  color: #B71C1C;
+  font-weight: 600;
+}
+
 .modal-actions button {
   padding: 7px 14px;
   border-radius: 5px;

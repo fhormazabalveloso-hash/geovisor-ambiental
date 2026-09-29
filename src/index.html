@@ -129,8 +129,39 @@
         <div id="analysis-results"></div>
         <div class="modal-actions">
           <button id="analysis-close-btn">Cerrar</button>
+          <button id="analysis-ai-btn" title="Texto listo para pegar en una herramienta de IA y obtener un borrador del apartado ambiental">🤖 Redactar con IA</button>
           <button id="analysis-download-csv">Descargar CSV</button>
           <button id="analysis-download-xlsx" class="primary">Descargar Excel</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="ai-modal-backdrop" hidden>
+      <div id="ai-modal">
+        <h2>Redacción asistida del apartado ambiental</h2>
+        <p class="modal-note">El visor no envía nada: prepara este texto con los resultados del análisis y lo copia a tu portapapeles. Pégalo en la herramienta de IA que use la empresa y revisa siempre el borrador antes de usarlo.</p>
+        <p class="modal-note ai-privacy-note">⚠️ Contiene datos de la licitación. Úsalo solo en herramientas de IA autorizadas por Quadrante.</p>
+
+        <div class="ai-fields">
+          <label class="modal-field">
+            Proyecto
+            <input type="text" id="ai-project-name">
+          </label>
+          <label class="modal-field">
+            Tipo de obra
+            <select id="ai-work-type"></select>
+          </label>
+        </div>
+
+        <label class="modal-field">
+          Texto para la IA
+          <textarea id="ai-prompt-text" readonly spellcheck="false"></textarea>
+        </label>
+
+        <div class="modal-actions">
+          <span id="ai-copy-status" aria-live="polite"></span>
+          <button id="ai-close-btn">Cerrar</button>
+          <button id="ai-copy-btn" class="primary">Copiar</button>
         </div>
       </div>
     </div>
@@ -162,5 +193,6 @@
   <script src="js/export.js"></script>
   <script src="js/upload.js"></script>
   <script src="js/analysis.js"></script>
+  <script src="js/ai-prompt.js"></script>
 </body>
 </html>
