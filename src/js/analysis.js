@@ -425,27 +425,144 @@ function minDistanceMetersToFeature(ctx, feature, limitM = Infinity) {
   return best <= limitM ? best : Infinity;
 }
 
-// Semaforo de sensibilidad (idea #1) -- parte de layer.sensitivityBase
-// (propuesta de Quadrante, no reglamentaria, ver nota junto al campo en
-// layers.js) y aplica como mucho UN escalon de ajuste, nunca una formula a
-// partir de hectareas/metros cruzados: la herramienta de referencia
-// (South Africa Screening Tool) tampoco calcula asi la sensibilidad,
-// cruza el sitio contra un mapa ya clasificado por ecologos. Los dos
-// ajustes que SI hacemos usan datos que ya calculamos en este mismo
-// analisis, no datos nuevos inventados.
-function computeSensitivity(layer, { count, nearestM, hasTipoC }) {
-  const base = layer.sensitivityBase || "Media";
-  let idx = SENSITIVITY_LEVELS.indexOf(base);
-  if (idx === -1) idx = SENSITIVITY_LEVELS.indexOf("Media");
-  if (count === 0 && nearestM != null) {
-    // "Cerca, sin cruce directo" (idea #4): un escalon menos, no es una
-    // afeccion confirmada todavia.
-    idx = Math.max(0, idx - 1);
-  } else if (hasTipoC) {
-    // Red Natura 2000 con ZEC+ZEPA a la vez: un escalon mas.
-    idx = Math.min(SENSITIVITY_LEVELS.length - 1, idx + 1);
+// --- Semaforo de sensibilidad (rediseno del 2026-09-29) ---
+//
+// Tres preguntas, cada una con una respuesta que se puede explicar:
+//   1. ¿Que importancia tiene el elemento? (l.importancia en layers.js,
+//      segun su regimen legal)
+//   2. ¿Como lo toca la obra?
+//      - directa: la obra en si (el trazado o la huella subida) lo pisa
+//      - roce: lo pisa, pero tan poco que puede deberse a la precision del
+//        dato (~10 m) -- se trata como "en el entorno" y se marca "a verificar"
+//      - entorno: esta dentro del buffer, pero la obra no lo pisa
+//      - proxima: fuera del buffer, a menos de NEAREST_SEARCH_MARGIN_M
+//   3. Sensibilidad = importancia x como lo toca (ver sensitivityFor):
+//
+//                 Directa     Entorno/roce   Proxima
+//        Alta     Muy Alta    Alta           Media
+//        Media    Alta        Media          Baja
+//        Baja     Media       Baja           Baja
+//
+// El "cuanto" (ha, m, % del espacio) no cambia el color salvo en el roce:
+// no hay umbrales legales de superficie para un cribado, y ponerlos seria
+// inventarlos. Siempre se muestra, en la explicacion de cada resultado.
+// Antes: un nivel fijo por capa con dos ajustes (cercano -1, Red Natura
+// ZEC+ZEPA +1), que no distinguia pisar el elemento de tenerlo en el buffer
+// y no se entendia (README §2 2026-09-29).
+
+// Por debajo de esto, un contacto directo se considera "roce, a verificar":
+// del orden de la precision del dato (~10 m en las capas en linea,
+// simplificacion de las teselas en las locales).
+const DIRECT_MIN_M = 25;
+const DIRECT_MIN_HA = 0.1;
+
+const AFECCION_LABEL = {
+  directa: "Directa",
+  roce: "Roce (a verificar)",
+  entorno: "En el entorno",
+  proxima: "Próxima",
+};
+
+function sensitivityFor(importancia, afeccion) {
+  let idx = IMPORTANCIA_LEVELS.indexOf(importancia);
+  if (idx === -1) idx = IMPORTANCIA_LEVELS.indexOf("Media");
+  // Los indices de IMPORTANCIA_LEVELS (Baja 0, Media 1, Alta 2) coinciden con
+  // los de SENSITIVITY_LEVELS para "en el entorno"; directa sube uno y
+  // proxima baja uno.
+  const shift = afeccion === "directa" ? 1 : afeccion === "proxima" ? -1 : 0;
+  return SENSITIVITY_LEVELS[Math.max(0, Math.min(SENSITIVITY_LEVELS.length - 1, idx + shift))];
+}
+
+function formatHa(ha) {
+  return ha.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+// Partes simples de la geometria subida, separadas por tipo, una vez por
+// analisis.
+function trazadoParts(geojson) {
+  const parts = turf.flatten(geojson).features.filter((f) => f.geometry);
+  return {
+    all: parts,
+    lines: parts.filter((f) => f.geometry.type === "LineString"),
+    polys: parts.filter((f) => f.geometry.type === "Polygon"),
+    points: parts.filter((f) => f.geometry.type === "Point"),
+  };
+}
+
+// Contacto de la OBRA (no del buffer) con los elementos de una capa que ya
+// se sabe que caen en el buffer. Devuelve null si la obra no toca ninguno,
+// o { kind: "directa"|"roce", names, text } con el "cuanto" del contacto:
+// - capa de poligonos: metros de trazado dentro, ha de la huella dentro o
+//   puntos de la obra dentro (medido sobre la union de los elementos
+//   tocados, para no contar dos veces figuras solapadas);
+// - capa de lineas: veces que la obra cruza el elemento, o metros del
+//   elemento dentro de la huella.
+function directContactForLayer(l, entities, traz, ctx) {
+  const touching = entities.filter((e) => traz.all.some((p) => turf.booleanIntersects(p, e.feature)));
+  if (touching.length === 0) return null;
+  const names = [...new Set(touching.map((e) => e.name).filter(Boolean))].sort();
+  const parts = [];
+  let isDirect = false;
+
+  if (l.geom === "polygon") {
+    const union = unionFeatureGroup(touching.map((e) => e.feature));
+    const pointsInside = traz.points.filter((p) => turf.booleanPointInPolygon(p, union)).length;
+    const lineM = traz.lines.reduce((s, ln) => s + lineLengthInsidePolygonMeters(ctx, ln, union), 0);
+    const polyHa = traz.polys.reduce((s, pg) => {
+      const inter = polygonIntersection(pg, union);
+      return s + (inter ? turf.area(inter) / 10000 : 0);
+    }, 0);
+    if (pointsInside > 0) {
+      isDirect = true;
+      parts.push(pointsInside === 1 ? "el punto de la obra cae dentro" : `${pointsInside} puntos de la obra caen dentro`);
+    }
+    if (lineM > 0) {
+      if (lineM >= DIRECT_MIN_M) isDirect = true;
+      parts.push(`${formatMeters(lineM)} m de trazado dentro`);
+    }
+    if (polyHa > 0) {
+      if (polyHa >= DIRECT_MIN_HA) isDirect = true;
+      parts.push(`${formatHa(polyHa)} ha de la obra dentro`);
+    }
+  } else {
+    // Cruces deduplicados por posicion (~1 m): un mismo cauce puede venir en
+    // dos fragmentos solapados en el borde de una tesela.
+    const crossings = new Set();
+    let elemM = 0;
+    for (const e of touching) {
+      for (const ln of traz.lines) {
+        for (const pt of turf.lineIntersect(e.feature, ln).features) {
+          crossings.add(pt.geometry.coordinates.map((c) => c.toFixed(5)).join(","));
+        }
+      }
+      for (const pg of traz.polys) elemM += lineLengthInsidePolygonMeters(ctx, e.feature, pg);
+    }
+    if (crossings.size > 0) {
+      isDirect = true;
+      parts.push(crossings.size === 1 ? "la obra lo cruza 1 vez" : `la obra lo cruza ${crossings.size} veces`);
+    }
+    if (elemM > 0) {
+      if (elemM >= DIRECT_MIN_M) isDirect = true;
+      parts.push(`${formatMeters(elemM)} m dentro de la obra`);
+    }
   }
-  return SENSITIVITY_LEVELS[idx];
+  if (parts.length === 0) parts.push("toca su borde");
+  return { kind: isDirect ? "directa" : "roce", names, text: parts.join(" · ") };
+}
+
+// La explicacion de un resultado, en una frase: sensibilidad, por que
+// (importancia y como lo toca) y cuanto.
+function sensitivityReason(r) {
+  const imp = `importancia ${r.importancia.toLowerCase()} (${r.layer.importanciaMotivo})`;
+  let how;
+  if (r.afeccion === "directa") how = `la obra lo pisa: ${r.contact.text}`;
+  else if (r.afeccion === "roce") how = `roce con la obra (${r.contact.text}), a verificar: puede deberse a la precisión del dato`;
+  else if (r.afeccion === "entorno") how = `en el entorno: dentro del buffer de ${bufferLabel(r.bufferM)}, la obra no lo pisa`;
+  else how = `próximo: a ${formatMeters(r.nearestM)} m del trazado, fuera del buffer de ${bufferLabel(r.bufferM)}`;
+  let cuanto = "";
+  if (r.count > 0 && r.totalHa > 0) cuanto = `${formatHa(r.totalHa)} ha dentro del buffer${r.pctText ? ` (${r.pctText})` : ""}`;
+  else if (r.count > 0 && r.totalM > 0) cuanto = `${formatMeters(r.totalM)} m dentro del buffer`;
+  return `${r.sensitivity}: ${[imp, how, cuanto].filter(Boolean).join(" · ")}`;
 }
 
 // overrides: { layerId: metros } -- buffer explicito elegido por el usuario
@@ -537,6 +654,7 @@ async function analyzeUploadedLayer(u, overrides = {}) {
     await wfsPromise;
 
     const distCtx = buildDistanceContext(sampleTrazadoPoints(u.geojson, NEAREST_SAMPLE_KM));
+    const traz = trazadoParts(u.geojson);
 
     const results = [];
     for (const l of targetLayers) {
@@ -551,33 +669,34 @@ async function analyzeUploadedLayer(u, overrides = {}) {
       let totalM = 0;
       const names = new Set();
       let nearby = [];
-
-      // Para el semaforo de sensibilidad (idea #1): un cruce con Red Natura
-      // 2000 TIPO=C (ZEC+ZEPA a la vez) sube un escalon la sensibilidad
-      // base de la capa -- ver nota junto a sensitivityBase en layers.js.
-      let hasTipoC = false;
+      let contact = null;
+      let pctText = "";
 
       const wfsResult = l.wfs ? wfsResults[l.id] : null;
       if (existing.length) {
         const feats = wfsResult ? wfsResult.features : map.queryRenderedFeatures(undefined, { layers: existing });
         const intersecting = feats.filter((f) => f.geometry && turf.booleanIntersects(f, bufferPolygon));
 
-        if (l.id === "red_natura_2000") {
-          hasTipoC = intersecting.some((f) => f.properties.TIPO === "C");
-        }
-
-        const addName = (f) => {
-          const clean = featureName(l, f);
-          if (clean) names.add(clean);
+        // Elementos que caen en el buffer: { feature, name, props, bufferHa }.
+        // Sirven para la superficie, los nombres, el % del espacio y el
+        // contacto directo con la obra (directContactForLayer).
+        const entities = [];
+        const addEntity = (feature, props) => {
+          const name = featureName(l, { properties: props });
+          if (name) names.add(name);
+          count++;
+          entities.push({ feature, name, props, bufferHa: 0 });
         };
         // Trozos de cada elemento dentro del buffer; la superficie se mide
         // al final sobre su union (ver unionAreaHectares).
         const pieces = [];
         const addPiece = (f) => {
           const piece = polygonIntersection(f, bufferPolygon);
-          if (piece) pieces.push(piece);
+          if (piece) {
+            pieces.push(piece);
+            entities[entities.length - 1].bufferHa = turf.area(piece) / 10000;
+          }
         };
-
         if (l.geom === "polygon" && l.idField) {
           // Agrupar fragmentos de la misma entidad (repetidos por el
           // margen de solape entre teselas MVT, ver unionFeatureGroup)
@@ -593,16 +712,15 @@ async function analyzeUploadedLayer(u, overrides = {}) {
             groups.get(key).push(f);
           }
           for (const group of groups.values()) {
-            addName(group[0]);
-            count++;
-            addPiece(unionFeatureGroup(group));
+            const merged = unionFeatureGroup(group);
+            addEntity(merged, group[0].properties);
+            addPiece(merged);
           }
           // Fragmentos sin id legible (dato de origen incompleto): se
           // cuentan por separado -- caso raro, no el camino normal. La
           // union final evita al menos que su superficie se sume dos veces.
           for (const f of noId) {
-            addName(f);
-            count++;
+            addEntity(f, f.properties);
             addPiece(f);
           }
         } else {
@@ -613,8 +731,7 @@ async function analyzeUploadedLayer(u, overrides = {}) {
           // completa); en poligonos la union final lo elimina en la
           // superficie, aunque el numero de elementos siga siendo aproximado.
           for (const f of intersecting) {
-            addName(f);
-            count++;
+            addEntity(f, f.properties);
             if (l.geom === "polygon") {
               addPiece(f);
             } else {
@@ -623,6 +740,21 @@ async function analyzeUploadedLayer(u, overrides = {}) {
           }
         }
         if (l.geom === "polygon") totalHa = unionAreaHectares(pieces);
+
+        // ¿La obra en si pisa algo? (no solo el buffer)
+        contact = directContactForLayer(l, entities, traz, distCtx);
+
+        // "Cuanto" en % del espacio, para el elemento con mas superficie en
+        // el buffer, si el dato de origen trae su superficie total.
+        if (l.areaHaField && entities.length) {
+          const top = entities.reduce((a, b) => (b.bufferHa > a.bufferHa ? b : a));
+          const totalElemHa = Number(top.props && top.props[l.areaHaField]);
+          if (top.bufferHa > 0 && totalElemHa > 0) {
+            const pct = Math.min(100, (top.bufferHa / totalElemHa) * 100);
+            const pctStr = pct.toLocaleString("es-ES", { maximumFractionDigits: pct < 1 ? 2 : 0 });
+            pctText = `${pctStr} % de ${top.name || "el espacio"}`;
+          }
+        }
 
         // Elementos cercanos FUERA del buffer, tambien cuando la capa ya
         // tiene cruce directo: hasta NEARBY_MAX_PER_LAYER, el mas cercano
@@ -660,18 +792,25 @@ async function analyzeUploadedLayer(u, overrides = {}) {
       }
       const nearestM = nearby.length ? nearby[0].distanceM : null;
       const nearestName = nearby.length ? nearby[0].name : null;
-      const sensitivity = computeSensitivity(l, { count, nearestM, hasTipoC });
-      // Sensibilidad de un elemento solo cercano (un escalon por debajo de
-      // la base), para la tabla de cercanos de una capa que ademas tiene
-      // cruce directo.
-      const nearSensitivity = computeSensitivity(l, { count: 0, nearestM: 0, hasTipoC: false });
-      results.push({
+      const afeccion =
+        contact ? contact.kind
+        : count > 0 ? "entorno"
+        : nearestM != null ? "proxima"
+        : null;
+      const importancia = l.importancia || "Media";
+      const sensitivity = afeccion ? sensitivityFor(importancia, afeccion) : null;
+      // Sensibilidad de los elementos solo cercanos de una capa que ademas
+      // tiene algo en el buffer (tabla de cercanos).
+      const nearSensitivity = sensitivityFor(importancia, "proxima");
+      const r = {
         layer: l, count, totalHa, totalM, names: [...names].sort(), nearby, nearestM, nearestName,
-        bufferM: layerBufferM, sensitivity, nearSensitivity,
+        bufferM: layerBufferM, importancia, afeccion, contact, pctText, sensitivity, nearSensitivity,
         // Capa en linea que no se pudo consultar: sin resultado (no "cero").
         serviceError: wfsResult ? wfsResult.error : null,
         truncated: wfsResult ? wfsResult.truncated : false,
-      });
+      };
+      r.reason = afeccion ? sensitivityReason(r) : "";
+      results.push(r);
     }
 
     // Las capas se hicieron temporalmente visibles mas arriba solo para
@@ -848,6 +987,21 @@ function showAnalysisResults(u, results, meta = {}) {
   }
   controlsHtml += `</div><button id="analysis-recalc-btn" class="primary">🔄 Recalcular con estos buffers</button></div>`;
 
+  // Como se decide la sensibilidad, a mano en el propio resultado (pedido
+  // por Francisco: "que quede mejor explicado").
+  const methodHtml = `<details class="analysis-method">
+    <summary>¿Cómo se decide la sensibilidad?</summary>
+    <p>Se combinan dos cosas: la <strong>importancia</strong> del elemento (según su régimen legal) y <strong>cómo lo toca la obra</strong>.</p>
+    <table class="analysis-method-table"><thead><tr><th>Importancia</th><th>Directa<br><small>la obra lo pisa</small></th><th>En el entorno<br><small>dentro del buffer</small></th><th>Próxima<br><small>fuera del buffer</small></th></tr></thead>
+    <tbody>
+      <tr><th>Alta</th><td>${sensitivityBadgeHtml("Muy Alta")}</td><td>${sensitivityBadgeHtml("Alta")}</td><td>${sensitivityBadgeHtml("Media")}</td></tr>
+      <tr><th>Media</th><td>${sensitivityBadgeHtml("Alta")}</td><td>${sensitivityBadgeHtml("Media")}</td><td>${sensitivityBadgeHtml("Baja")}</td></tr>
+      <tr><th>Baja</th><td>${sensitivityBadgeHtml("Media")}</td><td>${sensitivityBadgeHtml("Baja")}</td><td>${sensitivityBadgeHtml("Baja")}</td></tr>
+    </tbody></table>
+    <p><strong>Importancia alta:</strong> Red Natura 2000, espacios naturales protegidos, zonas húmedas, humedales y turberas, zona de flujo preferente, zona inundable T10. <strong>Media:</strong> dominio público hidráulico, cauces, vías pecuarias, zonas inundables T100/T500 y costeras.</p>
+    <p>Si la obra lo pisa menos de ${DIRECT_MIN_M} m o ${formatHa(DIRECT_MIN_HA)} ha, se marca <em>roce, a verificar</em> y cuenta como "en el entorno": puede deberse a la precisión del dato. El "cuánto" (ha, m, % del espacio) se da siempre en el porqué de cada fila. Criterio interno de Quadrante, no una clasificación reglamentaria.</p>
+  </details>`;
+
   let html = "";
   for (const nivel of ANALYSIS_NIVELES) {
     const rows = results.filter((r) => r.layer.nivel === nivel);
@@ -858,7 +1012,7 @@ function showAnalysisResults(u, results, meta = {}) {
       html += `<p class="analysis-empty">Sin afecciones detectadas en este nivel.</p>`;
     } else {
       html += `<table class="analysis-table"><thead><tr>
-        <th>Sensibilidad</th><th>Capa</th><th>Elementos</th><th>Nombres / códigos</th><th>Long. afectada (m)</th><th>Superficie afectada (ha)</th><th>Confirmado en campo</th>
+        <th>Sensibilidad</th><th>Capa</th><th>Afección</th><th>Nombres / códigos</th><th>Long. en buffer (m)</th><th>Superficie en buffer (ha)</th><th>Confirmado en campo</th>
       </tr></thead><tbody>`;
       for (const r of afectadas) {
         const nombres = r.names.length ? escapeHtml(r.names.join(", ")) : "-";
@@ -866,12 +1020,13 @@ function showAnalysisResults(u, results, meta = {}) {
         html += `<tr>
           <td>${sensitivityBadgeHtml(r.sensitivity)}</td>
           <td>${escapeHtml(r.layer.nombre)}</td>
-          <td class="num">${r.count}</td>
+          <td>${escapeHtml(AFECCION_LABEL[r.afeccion])}</td>
           <td class="names">${nombres}</td>
           <td class="num">${r.totalM > 0 ? Math.round(r.totalM).toLocaleString("es-ES") : "-"}</td>
           <td class="num">${ha}</td>
           <td>${fieldStatusSelectHtml(u, r.layer.id)}</td>
-        </tr>`;
+        </tr>
+        <tr class="analysis-reason-row"><td colspan="7">Por qué — ${escapeHtml(r.reason)}</td></tr>`;
       }
       html += `</tbody></table>`;
     }
@@ -890,13 +1045,14 @@ function showAnalysisResults(u, results, meta = {}) {
           <td>${escapeHtml(r.layer.nombre)}</td>
           <td class="names">${r.nearby.map(nearbyHtml).join("")}</td>
           <td>${hasHit ? `<span class="analysis-muted">ver tabla de arriba</span>` : fieldStatusSelectHtml(u, r.layer.id)}</td>
-        </tr>`;
+        </tr>
+        ${hasHit ? "" : `<tr class="analysis-reason-row"><td colspan="4">Por qué — ${escapeHtml(r.reason)}</td></tr>`}`;
       }
       html += `</tbody></table>`;
     }
     html += `</div>`;
   }
-  container.innerHTML = warningsHtml + autoActivatedHtml + controlsHtml + html;
+  container.innerHTML = warningsHtml + autoActivatedHtml + methodHtml + controlsHtml + html;
 
   container.querySelectorAll(".analysis-field-status").forEach((sel) => {
     sel.addEventListener("change", () => {
@@ -927,10 +1083,18 @@ document.getElementById("analysis-close-btn").addEventListener("click", () => {
 // "Elementos cercanos fuera del buffer" lleva el NOMBRE de cada elemento
 // con su distancia -- antes solo salia la distancia del mas cercano, sin
 // decir a que (caso de prueba del puerto de Carboneras, §4.2).
+// Afeccion, Importancia, Contacto con la obra y Motivo: semaforo de
+// sensibilidad explicado (rediseno del 2026-09-29, ver sensitivityFor).
 const RESULTS_HEADER = [
-  "Sensibilidad", "Nivel", "Capa", "Fuente", "Buffer aplicado (m)", "Elementos", "Nombres/códigos",
-  "Longitud afectada (m)", "Superficie afectada (ha)", "Elementos cercanos fuera del buffer",
-  "Distancia al más cercano (m)", "Confirmado en campo",
+  "Sensibilidad", "Afección", "Importancia", "Nivel", "Capa", "Fuente", "Buffer aplicado (m)", "Elementos",
+  "Nombres/códigos", "Contacto con la obra", "Longitud en el buffer (m)", "Superficie en el buffer (ha)",
+  "Elementos cercanos fuera del buffer", "Distancia al más cercano (m)", "Motivo de la sensibilidad",
+  "Confirmado en campo",
+];
+// Columnas del informe PDF (A4 apaisado, no caben las 16): indices de
+// RESULTS_HEADER y ancho en mm. El contacto con la obra va dentro del motivo.
+const REPORT_COLUMNS = [
+  [0, 18], [4, 26], [1, 18], [8, 34], [10, 14], [11, 14], [12, 44], [14, 78], [15, 17],
 ];
 
 // Fila por capa afectada -- o, si no hay cruce directo pero se detecto
@@ -946,16 +1110,20 @@ function resultsToRows(u, results) {
     if (r.count === 0 && r.nearby.length === 0) continue;
     rows.push([
       r.sensitivity,
+      AFECCION_LABEL[r.afeccion] || "",
+      r.importancia,
       r.layer.nivel,
       r.layer.nombre,
       r.layer.fuente || "",
       r.bufferM,
       r.count,
       r.names.join(" | "),
+      r.contact ? `${r.contact.text} (${r.contact.names.join(", ") || "sin nombre"})` : "",
       r.totalM > 0 ? Math.round(r.totalM * 10) / 10 : "",
       r.totalHa > 0 ? Math.round(r.totalHa * 1000) / 1000 : "",
       r.nearby.map(nearbyPlainText).join(" | "),
       r.nearestM != null ? Math.round(r.nearestM) : "",
+      r.reason,
       fieldStatus[r.layer.id] || FIELD_STATUS_OPTIONS[0],
     ]);
   }
@@ -978,7 +1146,7 @@ function analysisNotes(u, meta = {}) {
     ["Cobertura", ANALYSIS_COVERAGE_NOTE],
     ["Zonas inundables", `${ANALYSIS_FLOOD_COVERAGE_NOTE} Se consultan en vivo al servicio del SNCZI (MITECO) en el momento del análisis; geometría con precisión de ~10 m.`],
     ["Fuente y vigencia", "Cada capa indica su organismo de origen en la columna 'Fuente'. Confirmar la fecha de descarga vigente del catálogo con el equipo antes de una entrega final."],
-    ["Sensibilidad", "Criterio interno de Quadrante (Muy Alta/Alta/Media/Baja), no una clasificación reglamentaria — pensado para priorizar qué hallazgo revisar primero, no sustituye el criterio del técnico ambiental."]
+    ["Sensibilidad", `Combina la importancia del elemento (según su régimen legal) con cómo lo toca la obra. Importancia alta: Muy Alta si la obra lo pisa, Alta si solo está en el buffer, Media si está cerca. Importancia media: Alta / Media / Baja. Si la obra lo pisa menos de ${DIRECT_MIN_M} m o ${formatHa(DIRECT_MIN_HA)} ha se marca "roce, a verificar" y cuenta como en el buffer. Criterio interno de Quadrante, no una clasificación reglamentaria: sirve para priorizar qué revisar primero y no sustituye el criterio del técnico ambiental.`]
   );
   return notes;
 }
@@ -1026,14 +1194,13 @@ document.getElementById("analysis-download-xlsx").addEventListener("click", asyn
   // del Excel) -- Buffer/Distancia/Confirmado en campo son las nuevas
   // columnas de las ideas #2/#4/#6 del informe de investigacion. La
   // Sensibilidad (idea #1) va primero, es lo primero que hay que mirar.
-  const header = [
-    "Sensibilidad", "Nivel", "Capa", "Color", "Fuente", "Buffer aplicado (m)", "Elementos", "Nombres/códigos",
-    "Longitud afectada (m)", "Superficie afectada (ha)", "Elementos cercanos fuera del buffer",
-    "Distancia al más cercano (m)", "Confirmado en campo",
-  ];
-  const tableRows = rows.map(([sensibilidad, nivel, capa, fuente, bufferM, count, nombres, m, ha, cercanos, dist, estado]) => [
-    sensibilidad, nivel, capa, "", fuente, bufferM, count, nombres, m, ha, cercanos, dist, estado,
-  ]);
+  // RESULTS_HEADER con una columna "Color" justo despues de "Capa".
+  const CAPA_IDX = RESULTS_HEADER.indexOf("Capa");
+  const header = [...RESULTS_HEADER.slice(0, CAPA_IDX + 1), "Color", ...RESULTS_HEADER.slice(CAPA_IDX + 1)];
+  const tableRows = rows.map((row) => [...row.slice(0, CAPA_IDX + 1), "", ...row.slice(CAPA_IDX + 1)]);
+  const COLOR_COL = CAPA_IDX + 2; // 1-based
+  const wrapCols = ["Nombres/códigos", "Contacto con la obra", "Elementos cercanos fuera del buffer", "Motivo de la sensibilidad"]
+    .map((h) => header.indexOf(h) + 1);
 
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet("Afecciones");
@@ -1050,7 +1217,7 @@ document.getElementById("analysis-download-xlsx").addEventListener("click", asyn
     rows: tableRows,
   });
 
-  [14, 6, 34, 4, 24, 12, 10, 45, 16, 16, 60, 16, 20].forEach((w, i) => {
+  [14, 16, 12, 6, 30, 4, 24, 12, 10, 40, 40, 16, 16, 55, 14, 70, 18].forEach((w, i) => {
     sheet.getColumn(i + 1).width = w;
   });
 
@@ -1065,15 +1232,14 @@ document.getElementById("analysis-download-xlsx").addEventListener("click", asyn
     const sensColor = "FF" + (SENSITIVITY_COLOR[r.sensitivity] || SENSITIVITY_COLOR["Media"]).replace("#", "");
     const band = i % 2 === 1 ? XLSX_BAND_FILL : "FFFFFFFF";
     for (let c = 1; c <= header.length; c++) {
-      row.getCell(c).fill = { type: "pattern", pattern: "solid", fgColor: { argb: c === 4 ? layerColor : band } };
+      row.getCell(c).fill = { type: "pattern", pattern: "solid", fgColor: { argb: c === COLOR_COL ? layerColor : band } };
     }
     // Sensibilidad (col. 1) con su propio color de semaforo, texto blanco
     // en negrita para que se lea de un vistazo -- mismo criterio que la
     // columna Color (capa).
     row.getCell(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: sensColor } };
     row.getCell(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
-    row.getCell(8).alignment = { wrapText: true, vertical: "top" };
-    row.getCell(11).alignment = { wrapText: true, vertical: "top" };
+    for (const c of wrapCols) row.getCell(c).alignment = { wrapText: true, vertical: "top" };
     // Fila "cerca, sin cruce directo" (Elementos=0 con cercanos): en
     // cursiva para distinguirla de un cruce real de un vistazo.
     if (r.count === 0) {

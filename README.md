@@ -654,6 +654,47 @@ Este documento se centra en el **Componente 1**.
     estratégicos de ruido. El DPMT cubriría el hueco de datos para puertos
     con el mismo mecanismo.
 
+- **2026-09-29 - Semáforo de sensibilidad rediseñado** (pedido por
+  Francisco: "que me diga si toco o no algo ambiental, cuánto, y qué
+  importancia tiene"). El anterior (un nivel fijo por capa con dos ajustes)
+  no distinguía que la obra **pise** un elemento de que solo caiga en su
+  buffer, no usaba el "cuánto" y no explicaba el porqué. Ahora son tres
+  preguntas (`sensitivityFor`, `directContactForLayer` y
+  `sensitivityReason` en `analysis.js`):
+  1. **Importancia** del elemento por su régimen legal (`importancia` e
+     `importanciaMotivo` en `layers.js`). **Alta:** Red Natura, ENP, zonas
+     húmedas, humedales y turberas (subidos a Alta por decisión de
+     Francisco), zona de flujo preferente, T10. **Media:** DPH, cauces,
+     vías pecuarias (Media, decisión de Francisco), T100/T500, costeras.
+  2. **Cómo lo toca la obra:** **directa** (el trazado o la huella lo pisa:
+     metros de trazado dentro, ha de la huella dentro o veces que lo cruza),
+     **en el entorno** (solo dentro del buffer) o **próxima** (fuera del
+     buffer, a menos de 2 km). Un contacto directo de menos de 25 m o 0,1 ha
+     es **"roce, a verificar"** y cuenta como en el entorno: puede deberse a
+     la precisión del dato.
+  3. **Sensibilidad = importancia × afección.** Alta: Muy Alta / Alta /
+     Media. Media: Alta / Media / Baja. Baja: Media / Baja / Baja.
+
+  El "cuánto" (ha y m dentro del buffer, y % del espacio en Red Natura y ENP,
+  que traen su superficie total) no cambia el color salvo en el roce: no hay
+  umbrales legales de superficie para un cribado. Siempre se ve en el
+  **porqué** de cada fila (modal, Excel, informe, texto para la IA), p. ej.
+  *"Muy Alta: importancia alta (usos muy restringidos por el RDPH) · la obra
+  lo pisa: 67 m de trazado dentro · 0,73 ha dentro del buffer"*. El modal
+  incluye un desplegable "¿Cómo se decide la sensibilidad?" con la matriz.
+  Se quitó el ajuste "+1 si ZEC y ZEPA a la vez", que no encaja en el nuevo
+  esquema. Columnas nuevas en CSV y Excel: Afección, Importancia, Contacto
+  con la obra y Motivo; el informe PDF muestra un subconjunto
+  (`REPORT_COLUMNS`).
+
+  Probado a medias (la ventana estaba minimizada y el mapa no dibujaba, así
+  que solo salieron completas las capas en línea y las ya cargadas):
+  Manzanares da las zonas inundables y el DPH como afección directa, y
+  Carboneras las zonas inundables cercanas como "en el entorno". **Pendiente
+  para el 30/09: probar los cuatro casos con la ventana abierta**, en
+  especial el Islote de San Andrés en Carboneras, y revisar el modal y el
+  informe.
+
 ---
 
 ## 3. Arquitectura objetivo

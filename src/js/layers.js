@@ -27,29 +27,27 @@
 //        (p.ej. zona de policia de cauces). El usuario puede cambiarlo por
 //        capa antes de analizar; si no esta definido, usa el buffer del
 //        tramo (idea #2 de investigacion/ideas-mejora-geovisores-referencia.md).
-// sensitivityBase: nivel de sensibilidad (ver SENSITIVITY_LEVELS mas abajo)
-//        que se muestra por defecto para un hallazgo de esta capa en el
-//        analisis de afecciones -- semaforo de sensibilidad (idea #1 de
-//        investigacion/ideas-mejora-geovisores-referencia.md). Investigado
-//        (2026-09-24) como funciona realmente la herramienta de referencia
-//        (South Africa National Web-Based Environmental Screening Tool):
-//        NO calcula la sensibilidad en vivo a partir de la geometria del
-//        proyecto -- cruza el sitio contra un mapa nacional PRE-clasificado
-//        por ecologos (Critical Biodiversity Areas / Ecological Support
-//        Areas de SANBI), y reporta un nivel POR TEMA/CAPA, no un unico
-//        score agregado para todo el proyecto. Aqui no tenemos ese mapa de
-//        sensibilidad independiente, asi que la mejor aproximacion honesta
-//        es un valor fijo por capa (no calculado a partir de hectareas/
-//        metros cruzados -- eso seria precision falsa que ni la propia
-//        herramienta de referencia usa). ES UNA PROPUESTA DE QUADRANTE, no
-//        una clasificacion reglamentaria -- ajustar el criterio ambiental
-//        real corresponde a Francisco/el equipo, no a este codigo. Dos
-//        matices SI se calculan en analysis.js a partir de datos que ya
-//        tenemos (ver computeSensitivity): (a) un hallazgo "cerca, sin
-//        cruce directo" (idea #4) baja un escalon desde este valor base;
-//        (b) en red_natura_2000, un cruce con TIPO=C (ZEC+ZEPA a la vez)
-//        sube un escalon (doble designacion = valores combinados mas
-//        amplios).
+// importancia: "Alta" / "Media" / "Baja" -- valor del elemento segun su
+//        regimen legal, primer eje del semaforo de sensibilidad (ver
+//        sensitivityFor en analysis.js). importanciaMotivo: el porque en
+//        pocas palabras, que sale en la explicacion de cada resultado.
+//        Rediseno del 2026-09-29, pedido por Francisco: la version anterior
+//        (un nivel fijo por capa con dos ajustes) no se entendia -- no tenia
+//        en cuenta cuanto se afecta ni si la obra PISA el elemento o solo
+//        cae en su buffer. Ahora: sensibilidad = importancia x como lo toca
+//        la obra (directa / en el entorno / proxima), con el "cuanto"
+//        siempre visible (ha, m, % del espacio). Se inspira en la matriz
+//        valor x magnitud de las EIA en Espana (Conesa) y en PMST
+//        (Australia), que separa "en el area del proyecto" de "solo en el
+//        buffer". ES CRITERIO DE QUADRANTE, no una clasificacion
+//        reglamentaria: ajustar estas importancias corresponde al equipo
+//        ambiental.
+//        - Alta: proteccion estricta, casi siempre obliga a una evaluacion
+//          especifica (Red Natura, ENP, zonas humedas, humedales -- estos a
+//          peticion de Francisco --, zona de flujo preferente, T10).
+//        - Media: dominio publico o limitacion de usos, pide autorizacion de
+//          un organismo (DPH, cauces, vias pecuarias, T100/T500, costeras).
+//        - Baja: informativo (hoy ninguna capa analizada).
 //
 // Orden del array = orden de dibujo en el mapa (el ultimo elemento se
 // dibuja encima). Agrupado por tematica (para que coincida con el panel:
@@ -76,7 +74,8 @@ const FLOOD_LAYERS = [
     id: "zi_costera_t500",
     nombre: "Zona inundable costera T500",
     fuente: SNCZI_FUENTE,
-    sensitivityBase: "Baja",
+    importancia: "Media",
+    importanciaMotivo: "inundable desde el mar, probabilidad baja",
     tematica: "inundabilidad",
     nivel: 2,
     geom: "polygon",
@@ -90,7 +89,8 @@ const FLOOD_LAYERS = [
     id: "zi_costera_t100",
     nombre: "Zona inundable costera T100",
     fuente: SNCZI_FUENTE,
-    sensitivityBase: "Media",
+    importancia: "Media",
+    importanciaMotivo: "inundable desde el mar, probabilidad media",
     tematica: "inundabilidad",
     nivel: 2,
     geom: "polygon",
@@ -104,7 +104,8 @@ const FLOOD_LAYERS = [
     id: "zi_t500",
     nombre: "Zona inundable T500",
     fuente: SNCZI_FUENTE,
-    sensitivityBase: "Media", // zona inundable a efectos del RDPH (art. 14)
+    importancia: "Media",
+    importanciaMotivo: "zona inundable a efectos del RDPH",
     tematica: "inundabilidad",
     nivel: 2,
     geom: "polygon",
@@ -118,7 +119,8 @@ const FLOOD_LAYERS = [
     id: "zi_t100",
     nombre: "Zona inundable T100",
     fuente: SNCZI_FUENTE,
-    sensitivityBase: "Media",
+    importancia: "Media",
+    importanciaMotivo: "inundable con probabilidad media",
     tematica: "inundabilidad",
     nivel: 2,
     geom: "polygon",
@@ -132,7 +134,8 @@ const FLOOD_LAYERS = [
     id: "zi_t10",
     nombre: "Zona inundable T10",
     fuente: SNCZI_FUENTE,
-    sensitivityBase: "Alta", // alta probabilidad
+    importancia: "Alta",
+    importanciaMotivo: "inundable con alta probabilidad",
     tematica: "inundabilidad",
     nivel: 2,
     geom: "polygon",
@@ -146,7 +149,8 @@ const FLOOD_LAYERS = [
     id: "zi_zfp",
     nombre: "Zona de flujo preferente",
     fuente: SNCZI_FUENTE,
-    sensitivityBase: "Alta", // usos restringidos por el RDPH (art. 9 bis)
+    importancia: "Alta",
+    importanciaMotivo: "usos muy restringidos por el RDPH",
     tematica: "inundabilidad",
     nivel: 2,
     geom: "polygon",
@@ -190,14 +194,21 @@ const LAYERS = [
     },
     labelField: "SITE_NAME",
     idField: "site_code", // ver analysis.js: agrupa fragmentos de la misma entidad
-    sensitivityBase: "Alta", // sube a "Muy Alta" si TIPO=C (ver nota junto a sensitivityBase mas arriba)
+    importancia: "Alta",
+    importanciaMotivo: "exige evaluar las repercusiones sobre el espacio",
+    // areaHaField: superficie total del elemento en ha segun el dato de
+    // origen, para dar el "cuanto" tambien en % del espacio (ver
+    // analysis.js). Solo en capas que la traen.
+    areaHaField: "HECTAREAS",
     visibleByDefault: false,
   },
   {
     id: "enp",
     nombre: "Espacios naturales protegidos",
     fuente: "MITECO / REDIAM",
-    sensitivityBase: "Alta",
+    importancia: "Alta",
+    importanciaMotivo: "régimen de protección propio",
+    areaHaField: "Sup_ha",
     tematica: "espacios_protegidos",
     nivel: 1,
     sourceLayer: "Enp2025_p",
@@ -213,7 +224,8 @@ const LAYERS = [
     // deslinde oficial, y sin la palabra se leeria como todo el DPH.
     nombre: "Dominio público hidráulico deslindado",
     fuente: "CHG / confederaciones hidrográficas",
-    sensitivityBase: "Media", // vinculante (Nivel 1), pero es un criterio hidrologico/dominio publico, no biodiversidad directa
+    importancia: "Media",
+    importanciaMotivo: "dominio público: autorización del organismo de cuenca",
     tematica: "hidrografia",
     nivel: 1,
     sourceLayer: "DPH_DESLINDADO_20250319",
@@ -227,7 +239,8 @@ const LAYERS = [
     id: "iezh",
     nombre: "Zonas húmedas",
     fuente: "MITECO",
-    sensitivityBase: "Alta",
+    importancia: "Alta",
+    importanciaMotivo: "zona húmeda inventariada",
     tematica: "hidrografia",
     nivel: 1,
     sourceLayer: "IEZH_P_2025",
@@ -241,7 +254,8 @@ const LAYERS = [
     id: "red_hidrografica",
     nombre: "Red hidrográfica",
     fuente: "MITECO (Pfafstetter)",
-    sensitivityBase: "Media", // ya es Nivel 2/estimado en el proyecto
+    importancia: "Media",
+    importanciaMotivo: "cauce con zona de policía de 100 m",
     tematica: "hidrografia",
     nivel: 2,
     sourceLayer: "reproj",
@@ -262,7 +276,8 @@ const LAYERS = [
     id: "humedales_turberas",
     nombre: "Humedales y turberas",
     fuente: "MITECO (complementario a IEZH, vigencia/validez por confirmar)",
-    sensitivityBase: "Media", // la propia fuente ya la marca como de validez por confirmar -- no le damos "Alta" con un dato que dudamos nosotros mismos
+    importancia: "Alta",
+    importanciaMotivo: "hábitat húmedo sensible (vigencia del dato por confirmar)",
     tematica: "hidrografia",
     nivel: 2,
     sourceLayer: "Humedal_TurberaBCAM2_2025",
@@ -281,7 +296,8 @@ const LAYERS = [
     id: "vias_pecuarias",
     nombre: "Vías pecuarias",
     fuente: "MITECO / REDIAM",
-    sensitivityBase: "Media", // proteccion real, pero de otra naturaleza (servidumbre de paso/patrimonio) que la de un habitat
+    importancia: "Media",
+    importanciaMotivo: "dominio público pecuario: autorización de la comunidad autónoma",
     tematica: "patrimonio_natural",
     nivel: 1,
     sourceLayer: "RGVP_BDN_2024",
@@ -324,10 +340,11 @@ const LAYERS = [
   // limites_*.pmtiles siguen en data-web/ por si se retoman.
 ];
 
-// Semaforo de sensibilidad (idea #1, ver nota junto a sensitivityBase mas
-// arriba) -- de menor a mayor, para poder comparar/subir-bajar un escalon
-// por indice en computeSensitivity (analysis.js).
+// Semaforo de sensibilidad (ver nota junto a "importancia" mas arriba) --
+// de menor a mayor, para poder subir/bajar un escalon por indice en
+// sensitivityFor (analysis.js).
 const SENSITIVITY_LEVELS = ["Baja", "Media", "Alta", "Muy Alta"];
+const IMPORTANCIA_LEVELS = ["Baja", "Media", "Alta"];
 
 const SENSITIVITY_COLOR = {
   "Baja": "#2E7D32", // verde

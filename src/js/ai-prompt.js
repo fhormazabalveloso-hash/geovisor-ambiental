@@ -39,9 +39,7 @@ function aiFieldStatus(u, layerId) {
   return AI_FIELD_STATUS_SHORT[status] || status.toLowerCase();
 }
 
-function formatHa(ha) {
-  return ha.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
+// (formatHa vive en analysis.js)
 
 // Descripcion breve de la geometria subida: longitud de las lineas, area y
 // perimetro de los poligonos, numero de puntos.
@@ -125,6 +123,7 @@ function buildAiPrompt(u, results, meta, opts) {
     lines.push(
       `- ${r.layer.nombre} [${NIVEL_LABEL[r.layer.nivel]}; sensibilidad ${r.sensitivity}; buffer ${bufferLabel(r.bufferM)}; fuente ${r.layer.fuente || "sin indicar"}]: ` +
         `${r.count} elemento${r.count === 1 ? "" : "s"}${nombres}${medida.length ? ", " + medida.join(", ") : ""}. ` +
+        `Afección: ${AFECCION_LABEL[r.afeccion].toLowerCase()}. Motivo de la sensibilidad: ${r.reason}. ` +
         `Comprobación en campo: ${aiFieldStatus(u, r.layer.id)}.`
     );
   }
@@ -158,7 +157,7 @@ function buildAiPrompt(u, results, meta, opts) {
     "NOTAS DEL ANÁLISIS",
     "- Nivel 1 = afección jurídica plena. Nivel 2 = afección estimada, con matiz metodológico (p. ej. la red hidrográfica con 100 m aproxima la zona de policía de cauces donde no hay deslinde).",
     "- La superficie indicada es la del elemento dentro del buffer, no solo bajo el trazado.",
-    "- La sensibilidad es un criterio interno de Quadrante (Muy Alta/Alta/Media/Baja) para priorizar, no una clasificación reglamentaria.",
+    "- La sensibilidad (Muy Alta/Alta/Media/Baja) combina la importancia del elemento según su régimen legal con cómo lo toca la obra: directa (la obra lo pisa), en el entorno (solo dentro del buffer) o próxima (fuera del buffer). Un \"roce, a verificar\" es un contacto tan pequeño que puede deberse a la precisión del dato. Es criterio interno de Quadrante, no una clasificación reglamentaria.",
     `- Cobertura: ${ANALYSIS_COVERAGE_NOTE}`,
     `- Zonas inundables: ${ANALYSIS_FLOOD_COVERAGE_NOTE}`
   );

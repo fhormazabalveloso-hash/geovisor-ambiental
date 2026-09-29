@@ -876,6 +876,41 @@ html, body {
   font-style: italic;
 }
 
+/* Semaforo de sensibilidad explicado (analysis.js, sensitivityFor): el
+   porque de cada fila y la matriz importancia x afeccion. */
+.analysis-reason-row td {
+  font-size: 11px;
+  color: #555;
+  background: #FAFBFC;
+  border-top: none;
+  padding-top: 2px;
+}
+
+.analysis-method {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: #444;
+}
+
+.analysis-method summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--quadrante-blue);
+}
+
+.analysis-method-table {
+  border-collapse: collapse;
+  margin: 6px 0;
+}
+
+.analysis-method-table th,
+.analysis-method-table td {
+  border: 1px solid #e3e6ea;
+  padding: 4px 8px;
+  text-align: center;
+  font-size: 11.5px;
+}
+
 .modal-actions {
   display: flex;
   justify-content: flex-end;

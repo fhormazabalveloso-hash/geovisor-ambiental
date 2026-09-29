@@ -1247,9 +1247,12 @@ function buildReportPdf() {
     tableStartY = 32 + lines.length * 4 + 2;
   }
 
+  // Solo las columnas de REPORT_COLUMNS (analysis.js): las 16 del Excel no
+  // caben en A4 apaisado.
   const rows = resultsToRows(u, results);
   const body = rows.map((row) =>
-    row.map((v) => {
+    REPORT_COLUMNS.map(([idx]) => {
+      const v = row[idx];
       if (v === "" || v == null) return "-";
       if (typeof v === "number") return v.toLocaleString("es-ES");
       return String(v);
@@ -1273,23 +1276,16 @@ function buildReportPdf() {
     drawFooter();
   } else {
     pdf.autoTable({
-      head: [RESULTS_HEADER],
+      head: [REPORT_COLUMNS.map(([idx]) => RESULTS_HEADER[idx])],
       body,
       startY: tableStartY,
       margin: { left: marginX, right: marginX, bottom: 16 },
       styles: { fontSize: 7, cellPadding: 1.4, valign: "middle", lineColor: [220, 220, 220], lineWidth: 0.1 },
       headStyles: { fillColor: REPORT_BLUE, textColor: 255, fontStyle: "bold" },
       alternateRowStyles: { fillColor: REPORT_BAND },
-      // 12 columnas en A4 apaisado (273 mm utiles): las de texto largo
-      // (nombres y cercanos) con ancho fijo, el resto las reparte autoTable.
-      columnStyles: {
-        0: { cellWidth: 20, halign: "center" },
-        1: { cellWidth: 10, halign: "center" },
-        2: { cellWidth: 30 },
-        3: { cellWidth: 24 },
-        6: { cellWidth: 40 },
-        9: { cellWidth: 52 },
-      },
+      columnStyles: Object.fromEntries(
+        REPORT_COLUMNS.map(([, w], i) => [i, i === 0 ? { cellWidth: w, halign: "center" } : { cellWidth: w }])
+      ),
       didParseCell: (data) => {
         if (data.section !== "body" || data.column.index !== 0) return;
         const color = SENSITIVITY_COLOR[data.cell.raw];
