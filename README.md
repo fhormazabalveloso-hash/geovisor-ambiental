@@ -580,6 +580,32 @@ Este documento se centra en el **Componente 1**.
   Madrid, Tenerife, Baleares, Ceuta, Cantabria, Valencia, Bizkaia, alta mar
   y Portugal (los dos últimos sin rótulo, correcto).
 
+- **2026-09-29 - Prueba de trazado largo (58 km, Córdoba - Sierra Morena):
+  un fallo que abortaba el análisis y dos cuellos de botella.** Detalle en
+  `investigacion/ejemplos-de-uso/caso-carretera-larga-sierra-morena.md`.
+  1. **El análisis abortaba** ("must be a LineString, given
+     MultiLineString"). El borde de un espacio multiparte con huecos no se
+     descomponía bien antes de medir distancias. El fallo era anterior, pero
+     la lista de cercanos del 28/09 lo hacía casi seguro en trazados largos.
+     Arreglo: `turf.flatten`.
+  2. **156 s con la página congelada** midiendo distancias a los elementos
+     cercanos. Ahora se mide en una proyección local en metros (error
+     inferior al 0,5 %) y se acota primero con el rectángulo envolvente de
+     cada elemento (`minDistanceMetersToFeature`, `buildDistanceContext`).
+  3. **18 s midiendo la longitud de líneas dentro del buffer**, con trozos
+     de 10 m. Ahora es un cálculo exacto, por cruces de cada segmento con el
+     borde del buffer (`lineLengthInsidePolygonMeters`): 42 ms, y el mismo
+     resultado que el método anterior (+0,08 % en 67 elementos).
+
+  Resultado: **~7 s** en total. Analizado entero frente a en 6 tramos:
+  mismos elementos en todas las capas, superficies iguales (descontado el
+  solape de buffers en las uniones) y la red hidrográfica un 2 % más larga
+  (a zoom 9 sus teselas vienen algo más simplificadas). No probado por
+  encima de ~60 km; si hiciera falta, el análisis podría dividir él solo los
+  trazados largos. Regresión: Carboneras y Manzanares dan lo mismo (±1-2 m
+  en distancias; Manzanares 507 m de río en vez de 500 m, porque el método
+  antiguo redondeaba a trozos de 10 m).
+
 ---
 
 ## 3. Arquitectura objetivo

@@ -17,7 +17,6 @@
 // un punto de partida -- el dato preciso sigue saliendo de QGIS.
 
 const ANALYSIS_NIVELES = [1, 2];
-const ANALYSIS_CHUNK_KM = 0.01; // 10 m -- granularidad para medir longitud de linea dentro del buffer
 
 // Cuando una capa no cruza el buffer, hasta donde se busca el elemento mas
 // cercano (idea #4 de investigacion/ideas-mejora-geovisores-referencia.md):
@@ -29,8 +28,7 @@ const ANALYSIS_CHUNK_KM = 0.01; // 10 m -- granularidad para medir longitud de l
 const NEAREST_SEARCH_MARGIN_M = 2000;
 // Granularidad de muestreo del trazado para aproximar esa distancia minima
 // (ver sampleTrazadoPoints) -- 100 m es de sobra para una distancia que se
-// mide en cientos/miles de metros; no hace falta la precision de 10 m que
-// usa ANALYSIS_CHUNK_KM para longitud dentro del buffer.
+// mide en cientos/miles de metros.
 const NEAREST_SAMPLE_KM = 0.1;
 
 // Cuantos elementos cercanos (fuera del buffer) se listan como mucho por
@@ -92,31 +90,102 @@ function unifyBuffer(bufferFC) {
   return result;
 }
 
-function lineLengthInsidePolygonMeters(lineFeature, polygonFeature) {
-  const geom = lineFeature.geometry;
-  const lines =
-    geom.type === "MultiLineString"
-      ? geom.coordinates.map((c) => turf.lineString(c))
-      : [lineFeature];
+// --- Longitud de una linea (rio, via pecuaria) dentro del buffer ---
+//
+// Exacta en la proyeccion local en metros (ver buildDistanceContext): para
+// cada segmento se buscan los puntos donde cruza el borde del buffer y se
+// suman los trozos que quedan dentro. Antes se partia la linea en trozos de
+// 10 m con Turf y se comprobaba el punto medio de cada uno; en la carretera
+// de prueba de 58 km por Sierra Morena eso eran 18 s de los ~24 del analisis
+// (tramos de rio de decenas de km en las teselas de zoom bajo), y ademas
+// redondeaba a multiplos de 10 m.
 
-  let totalKm = 0;
-  for (const line of lines) {
-    let chunks;
-    try {
-      chunks = turf.lineChunk(line, ANALYSIS_CHUNK_KM, { units: "kilometers" }).features;
-    } catch (e) {
-      chunks = [line];
+// Anillos del poligono ya proyectados, una vez por buffer (se reutiliza
+// para todas las lineas de la capa).
+const projectedPolygonCache = new WeakMap();
+
+function projectPolygon(ctx, polygonFeature) {
+  const cached = projectedPolygonCache.get(polygonFeature);
+  if (cached && cached.project === ctx.project) return cached;
+  const rings = [];
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const part of turf.flatten(polygonFeature).features) {
+    if (!part.geometry || part.geometry.type !== "Polygon") continue;
+    for (const ring of part.geometry.coordinates) {
+      const pr = ring.map(ctx.project);
+      for (const [x, y] of pr) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+      rings.push(pr);
     }
-    for (const chunk of chunks) {
-      const len = turf.length(chunk, { units: "kilometers" });
-      if (len === 0) continue;
-      const mid = turf.along(chunk, len / 2, { units: "kilometers" });
-      if (turf.booleanPointInPolygon(mid, polygonFeature)) {
-        totalKm += len;
+  }
+  const result = { project: ctx.project, rings, bbox: [minX, minY, maxX, maxY] };
+  projectedPolygonCache.set(polygonFeature, result);
+  return result;
+}
+
+// Regla par-impar sobre todos los anillos: vale para huecos y para las
+// partes de un MultiPolygon, que en un buffer unificado no se solapan.
+function pointInRings(x, y, rings) {
+  let inside = false;
+  for (const ring of rings) {
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const [xi, yi] = ring[i];
+      const [xj, yj] = ring[j];
+      if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+    }
+  }
+  return inside;
+}
+
+// Parametros t (0-1) del segmento A-B donde cruza algun borde de los anillos.
+function segmentCrossings(ax, ay, bx, by, rings, out) {
+  const sMinX = Math.min(ax, bx), sMaxX = Math.max(ax, bx);
+  const sMinY = Math.min(ay, by), sMaxY = Math.max(ay, by);
+  const rx = bx - ax, ry = by - ay;
+  for (const ring of rings) {
+    for (let i = 1; i < ring.length; i++) {
+      const [cx, cy] = ring[i - 1];
+      const [dx, dy] = ring[i];
+      if (Math.max(cx, dx) < sMinX || Math.min(cx, dx) > sMaxX || Math.max(cy, dy) < sMinY || Math.min(cy, dy) > sMaxY) continue;
+      const sx = dx - cx, sy = dy - cy;
+      const den = rx * sy - ry * sx;
+      if (den === 0) continue;
+      const t = ((cx - ax) * sy - (cy - ay) * sx) / den;
+      const v = ((cx - ax) * ry - (cy - ay) * rx) / den;
+      if (t > 0 && t < 1 && v >= 0 && v <= 1) out.push(t);
+    }
+  }
+}
+
+function lineLengthInsidePolygonMeters(ctx, lineFeature, polygonFeature) {
+  const poly = projectPolygon(ctx, polygonFeature);
+  const [pMinX, pMinY, pMaxX, pMaxY] = poly.bbox;
+  let total = 0;
+  for (const part of turf.flatten(lineFeature).features) {
+    if (!part.geometry || part.geometry.type !== "LineString") continue;
+    const pts = part.geometry.coordinates.map(ctx.project);
+    for (let i = 1; i < pts.length; i++) {
+      const [ax, ay] = pts[i - 1];
+      const [bx, by] = pts[i];
+      if (Math.max(ax, bx) < pMinX || Math.min(ax, bx) > pMaxX || Math.max(ay, by) < pMinY || Math.min(ay, by) > pMaxY) continue;
+      const segLen = Math.hypot(bx - ax, by - ay);
+      if (segLen === 0) continue;
+      const ts = [0, 1];
+      segmentCrossings(ax, ay, bx, by, poly.rings, ts);
+      ts.sort((a, b) => a - b);
+      for (let k = 1; k < ts.length; k++) {
+        const t0 = ts[k - 1], t1 = ts[k];
+        if (t1 <= t0) continue;
+        const tm = (t0 + t1) / 2;
+        if (pointInRings(ax + tm * (bx - ax), ay + tm * (by - ay), poly.rings)) total += (t1 - t0) * segLen;
       }
     }
   }
-  return totalKm * 1000;
+  return total;
 }
 
 function polygonIntersection(envFeature, bufferFeature) {
@@ -252,46 +321,95 @@ function sampleTrazadoPoints(geojson, stepKm) {
   return points;
 }
 
-// Distancia minima (metros) entre cualquiera de los puntos muestreados del
-// trazado y una feature candidata (poligono, linea o punto). Aproximada por
-// muestreo -- coherente con el resto de la metodologia de cribado del
-// proyecto (ver cabecera del fichero), no un calculo geometrico exacto.
-function minDistanceMetersToFeature(samplePoints, feature) {
-  const geom = feature.geometry;
-  let min = Infinity;
+// --- Distancia del trazado a un elemento cercano ---
+//
+// Se mide en una proyeccion local en metros (equirectangular centrada en el
+// tramo), no con las funciones geodesicas de Turf: a estas distancias (hasta
+// unos pocos km) el error es inferior al 0,5 %, y es muchisimo mas rapido.
+// Con turf.pointToLineDistance, una carretera de 58 km por Sierra Morena
+// (590 puntos muestreados contra todos los elementos de la vista) tardaba
+// 156 s con la pagina congelada.
+const METERS_PER_DEGREE = 111320;
 
-  if (geom.type === "Point" || geom.type === "MultiPoint") {
-    const coords = geom.type === "Point" ? [geom.coordinates] : geom.coordinates;
-    for (const c of coords) {
-      const fp = turf.point(c);
-      for (const p of samplePoints) {
-        const d = turf.distance(p, fp, { units: "kilometers" });
-        if (d < min) min = d;
+// Puntos muestreados del trazado ya proyectados, una vez por analisis.
+function buildDistanceContext(samplePoints) {
+  const lat0 = samplePoints.reduce((s, p) => s + p.geometry.coordinates[1], 0) / samplePoints.length;
+  const kx = METERS_PER_DEGREE * Math.cos((lat0 * Math.PI) / 180);
+  const project = (c) => [c[0] * kx, c[1] * METERS_PER_DEGREE];
+  return { project, xy: samplePoints.map((p) => project(p.geometry.coordinates)) };
+}
+
+function pointSegmentDist2(px, py, ax, ay, bx, by) {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const len2 = dx * dx + dy * dy;
+  let t = len2 > 0 ? ((px - ax) * dx + (py - ay) * dy) / len2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  const ex = ax + t * dx - px;
+  const ey = ay + t * dy - py;
+  return ex * ex + ey * ey;
+}
+
+// Distancia minima (metros) entre los puntos muestreados del trazado y el
+// borde de una feature (poligono, linea o punto), o Infinity si queda a
+// mas de limitM. Aproximada por muestreo -- coherente con el resto de la
+// metodologia de cribado del proyecto (ver cabecera del fichero).
+//
+// Para no calcular la distancia exacta desde todos los puntos del trazado,
+// primero se acota con la distancia de cada punto al rectangulo envolvente
+// de la feature (cota inferior barata), y solo se calcula la exacta en los
+// puntos que aun pueden mejorar el minimo, de mas cerca a mas lejos.
+//
+// turf.flatten deja solo geometrias simples: un MultiPolygon con huecos
+// daba antes MultiLineString, que turf.pointToLineDistance no acepta, y el
+// error abortaba el analisis entero (misma carretera de prueba).
+function minDistanceMetersToFeature(ctx, feature, limitM = Infinity) {
+  const paths = [];
+  const points = [];
+  for (const part of turf.flatten(feature).features) {
+    const g = part.geometry;
+    if (!g) continue;
+    if (g.type === "Point") points.push(ctx.project(g.coordinates));
+    else if (g.type === "LineString") paths.push(g.coordinates.map(ctx.project));
+    else if (g.type === "Polygon") for (const ring of g.coordinates) paths.push(ring.map(ctx.project));
+  }
+  if (paths.length === 0 && points.length === 0) return Infinity;
+
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  const extend = ([x, y]) => {
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  };
+  points.forEach(extend);
+  paths.forEach((path) => path.forEach(extend));
+
+  const candidates = [];
+  for (const [x, y] of ctx.xy) {
+    const dx = Math.max(minX - x, 0, x - maxX);
+    const dy = Math.max(minY - y, 0, y - maxY);
+    const bound = Math.hypot(dx, dy);
+    if (bound <= limitM) candidates.push([bound, x, y]);
+  }
+  candidates.sort((a, b) => a[0] - b[0]);
+
+  let best2 = Infinity;
+  for (const [bound, x, y] of candidates) {
+    if (bound * bound >= best2) break;
+    for (const [qx, qy] of points) {
+      const d2 = (qx - x) ** 2 + (qy - y) ** 2;
+      if (d2 < best2) best2 = d2;
+    }
+    for (const path of paths) {
+      for (let i = 1; i < path.length; i++) {
+        const d2 = pointSegmentDist2(x, y, path[i - 1][0], path[i - 1][1], path[i][0], path[i][1]);
+        if (d2 < best2) best2 = d2;
       }
     }
-    return min * 1000;
   }
-
-  let line = feature;
-  if (geom.type === "Polygon" || geom.type === "MultiPolygon") {
-    try {
-      line = turf.polygonToLine(feature);
-    } catch (e) {
-      return Infinity;
-    }
-  }
-  const lines =
-    line.type === "FeatureCollection" ? line.features
-    : line.geometry.type === "MultiLineString" ? line.geometry.coordinates.map((c) => turf.lineString(c))
-    : [line];
-
-  for (const l of lines) {
-    for (const p of samplePoints) {
-      const d = turf.pointToLineDistance(p, l, { units: "kilometers" });
-      if (d < min) min = d;
-    }
-  }
-  return min * 1000;
+  const best = Math.sqrt(best2);
+  return best <= limitM ? best : Infinity;
 }
 
 // Semaforo de sensibilidad (idea #1) -- parte de layer.sensitivityBase
@@ -384,7 +502,7 @@ async function analyzeUploadedLayer(u, overrides = {}) {
     // §4.1) -- ahora se avisa en el modal, el Excel y el informe.
     const incomplete = waitOutcome !== "idle";
 
-    const trazadoSamples = sampleTrazadoPoints(u.geojson, NEAREST_SAMPLE_KM);
+    const distCtx = buildDistanceContext(sampleTrazadoPoints(u.geojson, NEAREST_SAMPLE_KM));
 
     const results = [];
     for (const l of targetLayers) {
@@ -465,7 +583,7 @@ async function analyzeUploadedLayer(u, overrides = {}) {
             if (l.geom === "polygon") {
               addPiece(f);
             } else {
-              totalM += lineLengthInsidePolygonMeters(f, bufferPolygon);
+              totalM += lineLengthInsidePolygonMeters(distCtx, f, bufferPolygon);
             }
           }
         }
@@ -488,8 +606,8 @@ async function analyzeUploadedLayer(u, overrides = {}) {
           // a una misma clave y solo se lista el mas cercano de ellos.
           const key = entityKey(l, f) ?? "__sin_nombre";
           if (intersectingKeys.has(key)) continue;
-          const d = minDistanceMetersToFeature(trazadoSamples, f);
-          if (!(d <= layerBufferM + NEAREST_SEARCH_MARGIN_M)) continue;
+          const d = minDistanceMetersToFeature(distCtx, f, layerBufferM + NEAREST_SEARCH_MARGIN_M);
+          if (!isFinite(d)) continue;
           const prev = nearestByKey.get(key);
           if (!prev || d < prev.distanceM) nearestByKey.set(key, { name: featureName(l, f), distanceM: d });
         }

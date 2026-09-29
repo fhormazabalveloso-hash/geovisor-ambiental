@@ -172,18 +172,13 @@ function findProvincia(lng, lat) {
   let best = null;
   let bestKm = Infinity;
   for (const f of situacionData.features) {
-    const boundary = turf.polygonToLine(f);
-    const parts = boundary.type === "FeatureCollection" ? boundary.features : [boundary];
-    for (const part of parts) {
-      const lines = part.geometry.type === "MultiLineString"
-        ? part.geometry.coordinates.map((c) => turf.lineString(c))
-        : [part];
-      for (const line of lines) {
-        const km = turf.pointToLineDistance(pt, line, { units: "kilometers" });
-        if (km < bestKm) {
-          bestKm = km;
-          best = f.properties;
-        }
+    // flatten: solo LineString simples (ver minDistanceMetersToFeature en
+    // analysis.js, mismo problema con MultiPolygon con huecos).
+    for (const line of turf.flatten(turf.polygonToLine(f)).features) {
+      const km = turf.pointToLineDistance(pt, line, { units: "kilometers" });
+      if (km < bestKm) {
+        bestKm = km;
+        best = f.properties;
       }
     }
   }
