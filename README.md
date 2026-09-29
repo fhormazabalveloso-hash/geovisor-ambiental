@@ -457,6 +457,65 @@ Este documento se centra en el **Componente 1**.
   `investigacion/ideas-mejora-geovisores-ronda2.md` (fuera de git, como
   todo `investigacion/`).
 
+- **2026-09-28/29 - Tercer caso de prueba (puerto) y 8 arreglos.** Prueba
+  como usuario con el tercer tipo de obra habitual, que faltaba: un dique
+  exterior de ~540 m en el puerto pesquero de Carboneras (Almería), junto
+  a la ZEC Islote de San Andrés y la ZEC marina Fondos Marinos Levante
+  Almeriense. Detalle en
+  `investigacion/ejemplos-de-uso/caso-puerto-dique-carboneras.md`.
+  Arreglos:
+  1. **Análisis incompleto sin aviso** (causa confirmada con una prueba
+     instrumentada). El cruce consulta lo que MapLibre tiene *dibujado*
+     (`queryRenderedFeatures`) tras esperar al evento `idle`, con un tope
+     de 8 s. Si el tope se agotaba, la consulta salía igual y una capa
+     recién encendida podía salir vacía: dos pasadas iguales dieron
+     resultados distintos. Ahora hay repintado forzado (`triggerRepaint`,
+     para que `idle` llegue siempre), un tope de 20 s y, si se agota, un
+     **aviso** en el modal, el Excel y el informe. Lo mismo al capturar la
+     cartografía, con aviso en el modal de exportación.
+  2. **El nombre del elemento cercano no llegaba a las exportaciones.** En
+     pantalla salía "RAMBLA DEL POZO, 417 m"; en CSV, Excel y PDF solo
+     "417". Nueva columna "Elementos cercanos fuera del buffer", con el
+     nombre y las distancias.
+  3. **Solo se listaba el elemento más cercano de cada capa, y solo si no
+     había cruce.** Una ZEC marina a 1,1 km quedaba oculta detrás de otra a
+     500 m. Ahora se listan hasta 5 por capa, ordenados por distancia,
+     también en capas con cruce directo. Los fragmentos se agrupan por
+     nombre, porque un mismo río viene en muchos tramos con distinto
+     `OBJECTID`.
+  4. **Casos al borde del buffer.** Cada elemento cercano indica los metros
+     que quedan fuera del borde del buffer. Se marca **"al borde"** si son
+     menos de 50 m o del 10 % del buffer (la ZEC del ejemplo estaba a 7 m).
+  5. **Plano y tabla no cuadraban.** Si una capa usaba un buffer propio
+     (p. ej. Red Natura a 1 km con el tramo a 500 m), el plano solo dibujaba
+     el general. Ahora los buffers por capa con cruce directo se dibujan
+     punteados (`setAnalysisBuffers` en `upload.js`) y salen en la leyenda,
+     con las capas que los usaron.
+  6. **Hectáreas duplicadas entre figuras solapadas.** En ENP, el Parque
+     Natural y la ZEC de Cabo de Gata tienen la misma geometría y se
+     sumaban. Ahora la superficie es la de la **unión** de los trozos
+     dentro del buffer (`unionAreaHectares`). Si una unión falla, ese trozo
+     se suma aparte: mejor pasarse que perder superficie en silencio. En el
+     caso de la carretera del Manzanares, DPH pasa de 3,13 a 3,00 ha por el
+     solape entre deslindes.
+  7. **Nota de cobertura en cada resultado.** El catálogo aún no tiene el
+     Dominio Público Marítimo-Terrestre ni hábitats marinos (posidonia): en
+     obras de costa o mar, "sin afecciones" puede ser falta de dato. Se dice
+     en el modal, el Excel y el informe.
+  8. **Leyenda:** ancho según el contenido (60-100 mm, antes fijo en 75) y
+     texto recortado con "…" en vez de estrechado hasta hacerse ilegible.
+
+  De paso salió un fallo anterior: **subir un archivo con el estilo del
+  mapa aún cargando** fallaba ("Style is not done loading") y dejaba un
+  tramo fantasma, dibujado en el mapa pero ausente del panel. Ahora la
+  subida reintenta solo ese error (con tope de 15 s) y el tramo se añade a
+  la lista después de dibujarse. No sirve esperar a `map.isStyleLoaded()`,
+  que devuelve `false` mientras quede cualquier tesela por cargar.
+
+  Verificado de punta a punta con los casos del puerto y de la carretera
+  (modal, CSV/Excel, cartografía PNG e informe PDF revisados), sin errores
+  nuevos en consola.
+
 ---
 
 ## 3. Arquitectura objetivo
@@ -585,6 +644,11 @@ Flujo objetivo *"sube el tramo y saca cartografía"*:
    oficial del proyecto, con riesgo real de confundirse en una memoria si
    se sube un extracto parcial de un trazado. Pendiente de retomar con un
    campo de PK inicial manual (ver §9).
+   La superficie de cada capa es la de la unión de sus elementos dentro del
+   buffer, sin contar dos veces las figuras solapadas. Además se listan
+   hasta 5 **elementos cercanos fuera del buffer** por capa (hasta 2 km más
+   allá), con la distancia al trazado y al borde del buffer y un aviso si
+   quedan "al borde" (ver §2 2026-09-28/29).
 5. Exporta **tabla de afecciones** a CSV y a Excel (con formato: colores
    del geovisor, cabecera corporativa, filtro automático). Word se
    descartó - no hace falta.
@@ -854,6 +918,14 @@ sigue saliendo de QGIS**; el visor acelera el paso previo (análisis + datos).
       símbolos según tipo de elemento, mapa de situación, cuadrícula UTM
       ETRS89 rotulada en el marco, e informe PDF único (cartografía +
       tabla de afecciones con semáforo + notas de metodología).
+- [x] Tercer caso de prueba, un puerto (2026-09-28/29): 8 arreglos del
+      análisis, las exportaciones y la cartografía, más el fallo de subida
+      con el estilo aún cargando (ver §2 y
+      `investigacion/ejemplos-de-uso/caso-puerto-dique-carboneras.md`).
+- [ ] Capas para obra marítima: Dominio Público Marítimo-Terrestre
+      (deslinde de Costas) y hábitats marinos / posidonia (idea 10 de la
+      ronda 2, EMODnet). Hoy es un hueco de datos, avisado en cada
+      resultado (2026-09-29).
 - [ ] Revisar la licencia de la capa IBA (`IBA_España_2025_11_05.gpkg`,
       ecosistema BirdLife) antes de publicar el visor (2026-09-25, ver
       §2)

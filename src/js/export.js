@@ -332,11 +332,16 @@ async function captureMapAtScale(targetScaleN, mapW, mapH, options = {}) {
     map.setPaintProperty(id, "line-width", scaleLineWidthExpr(original, lineWidthFactor));
   }
 
-  await new Promise((resolve) => {
-    map.once("idle", resolve);
-    // por si el mapa ya estaba "idle" y el evento no vuelve a disparar
-    setTimeout(resolve, 8000);
+  // Mismo criterio que analyzeUploadedLayer (analysis.js): repintado
+  // forzado para que "idle" llegue siempre, y si se agota el tope se avisa
+  // en vez de exportar en silencio un plano al que le puede faltar alguna
+  // capa todavia sin dibujar.
+  map.triggerRepaint();
+  const waitOutcome = await new Promise((resolve) => {
+    map.once("idle", () => resolve("idle"));
+    setTimeout(() => resolve("timeout"), ANALYSIS_IDLE_TIMEOUT_MS);
   });
+  const incomplete = waitOutcome !== "idle";
   // Margen extra: la colocacion final de las etiquetas de texto (symbol
   // layers) puede terminar un poco despues del evento "idle".
   await new Promise((resolve) => setTimeout(resolve, 500));
@@ -423,6 +428,24 @@ async function captureMapAtScale(targetScaleN, mapW, mapH, options = {}) {
         });
       }
     }
+    // Buffers por capa del ultimo analisis (ver setAnalysisBuffers en
+    // upload.js), uno por distancia, con las capas que lo usaron debajo.
+    const ringLayerId = `${u.id}-analysis-buffers-line`;
+    if (map.getLayer(ringLayerId)) {
+      for (const ring of u.analysisBuffers || []) {
+        const drawn = map.queryRenderedFeatures({ layers: [ringLayerId], filter: ["==", ["get", "meters"], ring.meters] });
+        if (drawn.length === 0) continue;
+        uploadLegendRows.push({
+          fill: u.color,
+          line: u.color,
+          nombre: `Buffer de análisis ${bufferLabel(ring.meters)}`,
+          subtitle: ring.layerNames.join(", "),
+          swatch: "buffer",
+          bufferStyle: "contorno",
+          dotted: true,
+        });
+      }
+    }
   }
 
   const grid = options.grid ? computeUtmGrid(mapW, mapH, dpr) : null;
@@ -448,7 +471,7 @@ async function captureMapAtScale(targetScaleN, mapW, mapH, options = {}) {
   map.resize();
   map.jumpTo({ center: originalCenter, zoom: originalZoom, bearing: originalBearing, pitch: originalPitch });
 
-  return { dataUrl, renderedLayerIds, renderedFieldValues, renderedNames, uploadLegendRows, grid, inset };
+  return { dataUrl, renderedLayerIds, renderedFieldValues, renderedNames, uploadLegendRows, grid, inset, incomplete };
 }
 
 // Cuantos nombres distintos como mucho se listan bajo cada fila de
@@ -540,7 +563,12 @@ function drawLegendSwatch(ctx, row, sx, sy, size) {
       ctx.globalAlpha = 1;
     }
     ctx.strokeStyle = row.line;
-    if (hasOutline) {
+    if (hasOutline && row.dotted) {
+      // Punteado, igual que el trazo del buffer de analisis en el mapa.
+      ctx.lineWidth = px(0.5);
+      ctx.lineCap = "round";
+      ctx.setLineDash([px(0.2), px(0.9)]);
+    } else if (hasOutline) {
       ctx.lineWidth = px(0.5);
       ctx.setLineDash([px(1.2), px(0.8)]);
     } else {
@@ -599,10 +627,31 @@ function drawScaleBar(ctx, x, y, scaleN) {
   return box;
 }
 
+// fillText con ancho maximo ESTRECHA el texto que no cabe, y con varios
+// nombres largos quedaba ilegible (p. ej. "RAMBLA DE LAS CONTRAVIESAS,
+// RAMBLA DE LOS RINCONES..." en el caso del puerto de Carboneras). Se
+// tolera un estrechamiento leve; a partir de ahi se recorta con "…".
+function fitLegendText(ctx, text, maxWidth) {
+  const tolerance = 1.12;
+  if (ctx.measureText(text).width <= maxWidth * tolerance) return text;
+  let cut = text.replace(/…$/, "");
+  while (cut.length > 1 && ctx.measureText(`${cut}…`).width > maxWidth * tolerance) {
+    cut = cut.slice(0, -1);
+  }
+  return `${cut.replace(/[\s,]+$/, "")}…`;
+}
+
+// Ancho de la leyenda segun su contenido, entre estos limites -- con un
+// ancho fijo de 75 mm los nombres largos se estrechaban o se cortaban
+// aunque sobrara sitio en el plano.
+const LEGEND_MIN_W_MM = 60;
+const LEGEND_MAX_W_MM = 100;
+
 // legendRows: array ya construido (buildLegendRows para las capas
 // ambientales, concatenado con las filas de los tramos/puntos subidos --
 // ver generateCartography) para poder combinar ambas fuentes sin que
 // drawLegend tenga que saber de donde viene cada fila.
+// Devuelve { width, height } del recuadro dibujado.
 function drawLegend(ctx, x, y, legendRows, maxHeight) {
   const titleSize = px(5.5);
   const rowTextSize = px(4);
@@ -612,7 +661,22 @@ function drawLegend(ctx, x, y, legendRows, maxHeight) {
   const subtitleH = px(4); // espacio extra solo para las filas que traen subtitle
   const padding = px(5);
   const titleBlockH = px(11);
-  const width = px(75);
+
+  ctx.save();
+  let widestText = 0;
+  for (const row of legendRows) {
+    ctx.font = `${rowTextSize}px Arial`;
+    widestText = Math.max(widestText, ctx.measureText(row.nombre).width);
+    if (row.subtitle) {
+      ctx.font = `italic ${subtitleTextSize}px Arial`;
+      widestText = Math.max(widestText, ctx.measureText(row.subtitle).width);
+    }
+  }
+  ctx.restore();
+  const width = Math.min(
+    px(LEGEND_MAX_W_MM),
+    Math.max(px(LEGEND_MIN_W_MM), padding * 2 + swatchSize + px(3) + widestText)
+  );
 
   const rowHeights = legendRows.map((r) => rowH + (r.subtitle ? subtitleH : 0));
   const totalRowsH = rowHeights.reduce((a, b) => a + b, 0);
@@ -637,28 +701,24 @@ function drawLegend(ctx, x, y, legendRows, maxHeight) {
     if (rowY + thisRowH > y + height) break;
     drawLegendSwatch(ctx, row, x + padding, rowY + (rowH - swatchSize) / 2, swatchSize);
 
+    const textMaxW = width - padding * 2 - swatchSize - px(3);
     ctx.fillStyle = "#222";
     ctx.font = `${rowTextSize}px Arial`;
     ctx.fillText(
-      row.nombre,
+      fitLegendText(ctx, row.nombre, textMaxW),
       x + padding + swatchSize + px(3),
       rowY + (rowH - rowTextSize) / 2,
-      width - padding * 2 - swatchSize - px(3)
+      textMaxW
     );
     if (row.subtitle) {
       ctx.fillStyle = "#666";
       ctx.font = `italic ${subtitleTextSize}px Arial`;
-      ctx.fillText(
-        row.subtitle,
-        x + padding + swatchSize + px(3),
-        rowY + rowH,
-        width - padding * 2 - swatchSize - px(3)
-      );
+      ctx.fillText(fitLegendText(ctx, row.subtitle, textMaxW), x + padding + swatchSize + px(3), rowY + rowH, textMaxW);
     }
     rowY += thisRowH;
   }
   ctx.restore();
-  return height;
+  return { width, height };
 }
 
 // Donde cruza una polilinea la recta eje=valor (axis 0: x, 1: y) --
@@ -857,7 +917,7 @@ async function generateCartography(orientation, title, subtitle, scaleN, options
   const mapH = totalH - cajetinH;
   const mapW = totalW;
 
-  const { dataUrl, renderedLayerIds, renderedFieldValues, renderedNames, uploadLegendRows, grid, inset } =
+  const { dataUrl, renderedLayerIds, renderedFieldValues, renderedNames, uploadLegendRows, grid, inset, incomplete } =
     await captureMapAtScale(scaleN, mapW, mapH, options);
   const mapImg = await loadImage(dataUrl);
 
@@ -881,8 +941,8 @@ async function generateCartography(orientation, title, subtitle, scaleN, options
   // visible con algo dibujado en esta vista (idea de Francisco,
   // 2026-09-24: la línea del proyecto no salía en la leyenda).
   const legendRows = buildLegendRows(visibleLayers, renderedFieldValues, renderedNames).concat(uploadLegendRows);
-  const legendH = drawLegend(ctx, margin, margin, legendRows, mapH - margin * 2);
-  avoidRects.push({ x: margin, y: margin, w: px(75), h: legendH });
+  const legendBox = drawLegend(ctx, margin, margin, legendRows, mapH - margin * 2);
+  avoidRects.push({ x: margin, y: margin, w: legendBox.width, h: legendBox.height });
 
   const arrowSize = Math.round(totalW * 0.035);
   await drawNorthArrow(ctx, mapW - arrowSize - margin, margin, arrowSize);
@@ -902,7 +962,7 @@ async function generateCartography(orientation, title, subtitle, scaleN, options
 
   await drawCajetin(ctx, 0, mapH, totalW, cajetinH, title, subtitle, grid ? grid.crsLabel : null);
 
-  return { canvas, totalMM };
+  return { canvas, totalMM, incomplete };
 }
 
 // --- UI wiring ---
@@ -948,6 +1008,7 @@ exportGenerateBtn.addEventListener("click", async () => {
     lastExport = await generateCartography(orientation, title, subtitle, scaleN, options);
     lastExport.meta = { title, subtitle, scaleN };
     exportPreview.src = lastExport.canvas.toDataURL("image/png");
+    document.getElementById("export-incomplete-note").hidden = !lastExport.incomplete;
     // El informe junta cartografia + tabla de afecciones: sin analisis
     // previo no hay tabla que incluir, asi que se desactiva y se explica.
     // lastAnalysisResults vive en analysis.js (cargado despues), pero
@@ -1012,6 +1073,7 @@ function buildReportPdf() {
   const { jsPDF } = window.jspdf;
   const { canvas, totalMM, meta } = lastExport;
   const { u, results } = lastAnalysisResults;
+  const analysisMeta = lastAnalysisResults.meta || {};
 
   const pdf = new jsPDF({
     orientation: totalMM.w > totalMM.h ? "landscape" : "portrait",
@@ -1044,6 +1106,17 @@ function buildReportPdf() {
     23
   );
 
+  // Resultado posiblemente incompleto (ver analyzeUploadedLayer): aviso
+  // bien visible antes de la tabla, no solo en las notas del final.
+  let tableStartY = 32;
+  if (analysisMeta.incomplete) {
+    pdf.setFont("helvetica", "bold");
+    pdf.setTextColor(183, 28, 28);
+    const lines = pdf.splitTextToSize(`AVISO: ${ANALYSIS_INCOMPLETE_NOTE}`, pageW - marginX * 2);
+    pdf.text(lines, marginX, 32);
+    tableStartY = 32 + lines.length * 4 + 2;
+  }
+
   const rows = resultsToRows(u, results);
   const body = rows.map((row) =>
     row.map((v) => {
@@ -1066,23 +1139,26 @@ function buildReportPdf() {
   if (body.length === 0) {
     pdf.setFontSize(10);
     pdf.setTextColor(70, 70, 70);
-    pdf.text("Sin afecciones ni elementos cercanos detectados en el análisis.", marginX, 36);
+    pdf.text("Sin afecciones ni elementos cercanos detectados en el análisis.", marginX, tableStartY + 4);
     drawFooter();
   } else {
     pdf.autoTable({
       head: [RESULTS_HEADER],
       body,
-      startY: 32,
+      startY: tableStartY,
       margin: { left: marginX, right: marginX, bottom: 16 },
-      styles: { fontSize: 7.5, cellPadding: 1.5, valign: "middle", lineColor: [220, 220, 220], lineWidth: 0.1 },
+      styles: { fontSize: 7, cellPadding: 1.4, valign: "middle", lineColor: [220, 220, 220], lineWidth: 0.1 },
       headStyles: { fillColor: REPORT_BLUE, textColor: 255, fontStyle: "bold" },
       alternateRowStyles: { fillColor: REPORT_BAND },
+      // 12 columnas en A4 apaisado (273 mm utiles): las de texto largo
+      // (nombres y cercanos) con ancho fijo, el resto las reparte autoTable.
       columnStyles: {
-        0: { cellWidth: 22, halign: "center" },
-        1: { cellWidth: 11, halign: "center" },
-        2: { cellWidth: 38 },
-        3: { cellWidth: 32 },
-        6: { cellWidth: 55 },
+        0: { cellWidth: 20, halign: "center" },
+        1: { cellWidth: 10, halign: "center" },
+        2: { cellWidth: 30 },
+        3: { cellWidth: 24 },
+        6: { cellWidth: 40 },
+        9: { cellWidth: 52 },
       },
       didParseCell: (data) => {
         if (data.section !== "body" || data.column.index !== 0) return;
@@ -1096,13 +1172,9 @@ function buildReportPdf() {
     });
   }
 
-  // Notas de metodologia -- mismo contenido que la hoja "Info" del Excel.
-  const notes = [
-    ["Nota", "Estimación de cribado a partir de teselas vectoriales — no sustituye el análisis en QGIS."],
-    ["Buffer", "Algunas capas pueden usar un buffer distinto al del tramo — ver columna 'Buffer aplicado (m)'."],
-    ["Fuente y vigencia", "Cada capa indica su organismo de origen en la columna 'Fuente'. Confirmar la fecha de descarga vigente del catálogo con el equipo antes de una entrega final."],
-    ["Sensibilidad", "Criterio interno de Quadrante (Muy Alta/Alta/Media/Baja), no una clasificación reglamentaria — pensado para priorizar qué hallazgo revisar primero, no sustituye el criterio del técnico ambiental."],
-  ];
+  // Notas de metodologia -- mismo contenido que la hoja "Info" del Excel
+  // (analysisNotes en analysis.js).
+  const notes = analysisNotes(u, analysisMeta);
   let y = (pdf.lastAutoTable ? pdf.lastAutoTable.finalY : 40) + 8;
   const pageH = pdf.internal.pageSize.getHeight();
   const textW = pageW - marginX * 2 - 32;

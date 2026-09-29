@@ -55,12 +55,30 @@ function bufferLabel(m) {
 let uploadCounter = 0;
 const uploadedLayers = []; // { id, name, geojson, color, visible, opacity, lineWidth, bufferMeters, bufferOpacity, bufferStyle }
 
-function nextUploadColor() {
-  return UPLOAD_COLORS[uploadCounter % UPLOAD_COLORS.length];
+function uploadColorFor(n) {
+  return UPLOAD_COLORS[n % UPLOAD_COLORS.length];
 }
 
 function uploadLayerIds(u) {
-  return [`${u.id}-fill`, `${u.id}-line`, `${u.id}-point`, `${u.id}-buffer`, `${u.id}-buffer-line`];
+  return [`${u.id}-fill`, `${u.id}-line`, `${u.id}-point`, `${u.id}-buffer`, `${u.id}-buffer-line`, `${u.id}-analysis-buffers-line`];
+}
+
+const EMPTY_FC = { type: "FeatureCollection", features: [] };
+
+// Buffers por capa usados en el ultimo analisis, cuando no coinciden con el
+// buffer general del tramo (p. ej. Red Natura a 1 km con el tramo a
+// 500 m). Los calcula analysis.js; aqui solo se guardan y se dibujan, con
+// un trazo punteado distinto del discontinuo del buffer general. Ver
+// investigacion/ejemplos-de-uso/caso-puerto-dique-carboneras.md §4.5.
+// rings: [{ meters, layerNames, polygon }]
+function setAnalysisBuffers(u, rings) {
+  u.analysisBuffers = rings.map((r) => ({ meters: r.meters, layerNames: r.layerNames }));
+  u.analysisBuffersGeojson = {
+    type: "FeatureCollection",
+    features: rings.map((r) => ({ type: "Feature", geometry: r.polygon.geometry, properties: { meters: r.meters } })),
+  };
+  const src = map.getSource(`${u.id}-analysis-buffers-src`);
+  if (src) src.setData(u.analysisBuffersGeojson);
 }
 
 function addUploadedLayerToMap(u) {
@@ -86,6 +104,14 @@ function addUploadedLayerToMap(u) {
     source: `${u.id}-buffer-src`,
     layout: { visibility: u.visible && u.bufferMeters && bufferHasOutline(u) ? "visible" : "none" },
     paint: { "line-color": u.color, "line-width": 2, "line-dasharray": [3, 2] },
+  });
+  map.addSource(`${u.id}-analysis-buffers-src`, { type: "geojson", data: u.analysisBuffersGeojson || EMPTY_FC });
+  map.addLayer({
+    id: `${u.id}-analysis-buffers-line`,
+    type: "line",
+    source: `${u.id}-analysis-buffers-src`,
+    layout: { visibility: u.visible ? "visible" : "none", "line-cap": "round" },
+    paint: { "line-color": u.color, "line-width": 1.5, "line-dasharray": [0.5, 2] },
   });
 
   map.addLayer({
@@ -190,6 +216,9 @@ function applyUploadedLayerState(u) {
   if (map.getSource(`${u.id}-buffer-src`)) {
     map.getSource(`${u.id}-buffer-src`).setData(u.bufferGeojson);
   }
+  if (map.getLayer(`${u.id}-analysis-buffers-line`)) {
+    map.setLayoutProperty(`${u.id}-analysis-buffers-line`, "visibility", vis);
+  }
 }
 
 function removeUploadedLayer(id) {
@@ -201,6 +230,7 @@ function removeUploadedLayer(id) {
   }
   if (map.getSource(u.id)) map.removeSource(u.id);
   if (map.getSource(`${u.id}-buffer-src`)) map.removeSource(`${u.id}-buffer-src`);
+  if (map.getSource(`${u.id}-analysis-buffers-src`)) map.removeSource(`${u.id}-analysis-buffers-src`);
   uploadedLayers.splice(idx, 1);
   buildUploadPanel();
 }
@@ -387,6 +417,9 @@ function buildUploadPanel() {
       const u = uploadedLayers.find((x) => x.id === sel.dataset.id);
       u.bufferMeters = Number(sel.value);
       computeBuffer(u);
+      // Los buffers por capa del analisis anterior ya no corresponden al
+      // buffer nuevo del tramo: se quitan hasta que se vuelva a analizar.
+      setAnalysisBuffers(u, []);
       applyUploadedLayerState(u);
       const row = sel.closest(".upload-row");
       row.querySelector(".upload-buffer-style-row").style.display = u.bufferMeters ? "" : "none";
@@ -424,14 +457,16 @@ function buildUploadPanel() {
 }
 
 function addUploadedLayer(name, geojson) {
-  uploadCounter++;
+  // El contador solo avanza si el tramo llega a anadirse (ver
+  // addUploadedLayerWhenReady: un reintento no debe saltarse ids/colores).
+  const n = uploadCounter + 1;
   const fc = geojson.type === "FeatureCollection" ? geojson : { type: "FeatureCollection", features: [geojson] };
   const u = {
-    id: `upload-${uploadCounter}`,
+    id: `upload-${n}`,
     name,
     geojson: fc,
     bufferGeojson: { type: "FeatureCollection", features: [] },
-    color: nextUploadColor(),
+    color: uploadColorFor(n),
     visible: true,
     opacity: 1,
     lineWidth: LINE_WIDTH_DEFAULT,
@@ -439,10 +474,34 @@ function addUploadedLayer(name, geojson) {
     bufferOpacity: 0.3,
     bufferStyle: BUFFER_STYLE_DEFAULT,
   };
-  uploadedLayers.push(u);
+  // Primero al mapa y despues a la lista: si addSource/addLayer fallan, el
+  // tramo no se queda "fantasma" en uploadedLayers (el manejador de
+  // styledata lo acabaria dibujando igualmente aunque el panel dijera que
+  // no hay tramos -- visto al subir un archivo con el estilo aun cargando).
   addUploadedLayerToMap(u);
+  uploadCounter = n;
+  uploadedLayers.push(u);
   buildUploadPanel();
   return u;
+}
+
+// Justo al abrir el visor, o durante un cambio de mapa base, map.addSource
+// lanza "Style is not done loading" mientras la definicion del estilo aun
+// no esta lista. No sirve esperar a map.isStyleLoaded(): devuelve false
+// mientras quede CUALQUIER tesela por cargar, y la subida se quedaba
+// esperando indefinidamente. Se reintenta solo ese error concreto, con tope.
+const STYLE_READY_TIMEOUT_MS = 15000;
+
+async function addUploadedLayerWhenReady(name, geojson) {
+  const deadline = performance.now() + STYLE_READY_TIMEOUT_MS;
+  for (;;) {
+    try {
+      return addUploadedLayer(name, geojson);
+    } catch (e) {
+      if (!/Style is not done loading/.test(e.message) || performance.now() > deadline) throw e;
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+  }
 }
 
 async function parseUploadedFile(file) {
@@ -509,7 +568,7 @@ uploadFileInput.addEventListener("change", async () => {
   for (const file of files) {
     try {
       const geojson = await parseUploadedFile(file);
-      addUploadedLayer(file.name, geojson);
+      await addUploadedLayerWhenReady(file.name, geojson);
       ok++;
     } catch (e) {
       console.error(e);

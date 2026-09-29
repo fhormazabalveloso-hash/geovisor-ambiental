@@ -33,6 +33,36 @@ const NEAREST_SEARCH_MARGIN_M = 2000;
 // usa ANALYSIS_CHUNK_KM para longitud dentro del buffer.
 const NEAREST_SAMPLE_KM = 0.1;
 
+// Cuantos elementos cercanos (fuera del buffer) se listan como mucho por
+// capa. Antes solo se mostraba el mas cercano, y en el caso de prueba del
+// puerto de Carboneras una ZEC marina a 1,1 km quedaba oculta detras del
+// Islote de San Andres, a 500 m (ver
+// investigacion/ejemplos-de-uso/caso-puerto-dique-carboneras.md §4.3).
+const NEARBY_MAX_PER_LAYER = 5;
+
+// Un elemento cercano se marca "al borde del buffer" si queda a menos de
+// 50 m, o del 10 % del buffer de esa capa si es mayor, fuera de su borde
+// (mismo caso de prueba, §4.4: la ZEC quedaba a 7 m del borde de un buffer
+// de 500 m y nada lo destacaba).
+function bufferEdgeThresholdM(bufferM) {
+  return Math.max(50, bufferM * 0.1);
+}
+
+// Espera maxima a que el mapa cargue Y dibuje las capas antes de
+// consultarlas (queryRenderedFeatures solo ve lo dibujado). Si se agota,
+// el resultado se marca como posiblemente incompleto en vez de darlo por
+// bueno en silencio (mismo caso de prueba, §4.1).
+const ANALYSIS_IDLE_TIMEOUT_MS = 20000;
+
+const ANALYSIS_INCOMPLETE_NOTE =
+  "Puede que alguna capa no terminara de cargar a tiempo (conexión lenta) y falten elementos en este resultado. Repite el análisis antes de usarlo.";
+
+// Hueco de datos conocido, visible en cada resultado: sin estas capas, un
+// "sin afecciones" en una obra de costa o mar puede ser falta de dato
+// (caso de prueba del puerto de Carboneras, §4.6).
+const ANALYSIS_COVERAGE_NOTE =
+  "El catálogo todavía no incluye el Dominio Público Marítimo-Terrestre (deslinde de Costas) ni hábitats marinos como la posidonia. En obras de costa o mar, que no salgan afecciones no las descarta.";
+
 // Estados posibles de la verificacion en campo de un hallazgo (idea #6 de
 // investigacion/ideas-mejora-geovisores-referencia.md) -- el primero es el
 // valor por defecto (sin confirmar todavia).
@@ -89,15 +119,54 @@ function lineLengthInsidePolygonMeters(lineFeature, polygonFeature) {
   return totalKm * 1000;
 }
 
-function polygonIntersectionHectares(envFeature, bufferFeature) {
-  let inter;
+function polygonIntersection(envFeature, bufferFeature) {
   try {
-    inter = turf.intersect(envFeature, bufferFeature);
+    return turf.intersect(envFeature, bufferFeature);
   } catch (e) {
-    return 0;
+    return null;
   }
-  if (!inter) return 0;
-  return turf.area(inter) / 10000;
+}
+
+// Superficie de la UNION de los trozos que caen dentro del buffer, no la
+// suma: una misma zona puede tener varias figuras a la vez en la misma
+// capa (p. ej. en ENP el Parque Natural y la ZEC de Cabo de Gata-Nijar
+// tienen la misma geometria) y sumarlas duplicaba las hectareas (caso de
+// prueba del puerto de Carboneras, §4.7). Si una union falla, ese trozo
+// se suma aparte: mejor pasarse un poco que perder superficie en silencio.
+function unionAreaHectares(pieces) {
+  if (pieces.length === 0) return 0;
+  let acc = pieces[0];
+  let extraM2 = 0;
+  for (let i = 1; i < pieces.length; i++) {
+    try {
+      const u = turf.union(acc, pieces[i]);
+      if (u) acc = u;
+      else extraM2 += turf.area(pieces[i]);
+    } catch (e) {
+      extraM2 += turf.area(pieces[i]);
+    }
+  }
+  return (turf.area(acc) + extraM2) / 10000;
+}
+
+// Nombre limpio de un elemento ("" si no tiene o es un marcador tipo
+// "sin nombre").
+function featureName(layer, f) {
+  if (!layer.labelField) return "";
+  const raw = f.properties[layer.labelField];
+  const clean = raw == null ? "" : String(raw).trim();
+  return ANALYSIS_PLACEHOLDER_NAMES.has(clean.toLowerCase()) ? "" : clean;
+}
+
+// Clave para agrupar fragmentos de un mismo elemento al listar los
+// cercanos: primero el nombre, porque es lo que se muestra y porque un
+// mismo rio viene partido en muchos tramos con distinto OBJECTID; si no
+// hay nombre, el idField de la capa. null si no hay ninguno de los dos.
+function entityKey(layer, f) {
+  const name = featureName(layer, f);
+  if (name) return `n:${name}`;
+  if (layer.idField && f.properties[layer.idField] != null) return `i:${f.properties[layer.idField]}`;
+  return null;
 }
 
 // El pipeline tesela con el driver MVT de GDAL, que por defecto anade un
@@ -301,10 +370,19 @@ async function analyzeUploadedLayer(u, overrides = {}) {
       if (!layerVisible[l.id]) setLayerVisible(l, true);
     }
 
-    await new Promise((resolve) => {
-      map.once("idle", resolve);
-      setTimeout(resolve, 8000);
+    // triggerRepaint: sin cambios de camara ni de capas no habria fotograma
+    // nuevo y "idle" no volveria a dispararse, y se agotaria el tope aunque
+    // todo estuviera ya dibujado.
+    map.triggerRepaint();
+    const waitOutcome = await new Promise((resolve) => {
+      map.once("idle", () => resolve("idle"));
+      setTimeout(() => resolve("timeout"), ANALYSIS_IDLE_TIMEOUT_MS);
     });
+    // Tope agotado = alguna capa puede no estar dibujada todavia, y saldria
+    // vacia. Antes (tope de 8 s, sin aviso) dos pasadas iguales llegaron a
+    // dar resultados distintos (caso de prueba del puerto de Carboneras,
+    // §4.1) -- ahora se avisa en el modal, el Excel y el informe.
+    const incomplete = waitOutcome !== "idle";
 
     const trazadoSamples = sampleTrazadoPoints(u.geojson, NEAREST_SAMPLE_KM);
 
@@ -316,13 +394,11 @@ async function analyzeUploadedLayer(u, overrides = {}) {
 
       const idsToCheck = l.geom === "polygon" ? [`${l.id}-fill`] : [`${l.id}-line`];
       const existing = bufferPolygon ? idsToCheck.filter((id) => map.getLayer(id)) : [];
-      const nameField = l.labelField;
       let count = 0;
       let totalHa = 0;
       let totalM = 0;
       const names = new Set();
-      let nearestM = null;
-      let nearestName = null;
+      let nearby = [];
 
       // Para el semaforo de sensibilidad (idea #1): un cruce con Red Natura
       // 2000 TIPO=C (ZEC+ZEPA a la vez) sube un escalon la sensibilidad
@@ -338,10 +414,15 @@ async function analyzeUploadedLayer(u, overrides = {}) {
         }
 
         const addName = (f) => {
-          if (!nameField) return;
-          const raw = f.properties[nameField];
-          const clean = raw == null ? "" : String(raw).trim();
-          if (clean && !ANALYSIS_PLACEHOLDER_NAMES.has(clean.toLowerCase())) names.add(clean);
+          const clean = featureName(l, f);
+          if (clean) names.add(clean);
+        };
+        // Trozos de cada elemento dentro del buffer; la superficie se mide
+        // al final sobre su union (ver unionAreaHectares).
+        const pieces = [];
+        const addPiece = (f) => {
+          const piece = polygonIntersection(f, bufferPolygon);
+          if (piece) pieces.push(piece);
         };
 
         if (l.geom === "polygon" && l.idField) {
@@ -361,58 +442,80 @@ async function analyzeUploadedLayer(u, overrides = {}) {
           for (const group of groups.values()) {
             addName(group[0]);
             count++;
-            totalHa += polygonIntersectionHectares(unionFeatureGroup(group), bufferPolygon);
+            addPiece(unionFeatureGroup(group));
           }
           // Fragmentos sin id legible (dato de origen incompleto): se
-          // miden por separado, con el mismo riesgo de sobreestimacion
-          // que antes de este fix -- caso raro, no el camino normal.
+          // cuentan por separado -- caso raro, no el camino normal. La
+          // union final evita al menos que su superficie se sume dos veces.
           for (const f of noId) {
             addName(f);
             count++;
-            totalHa += polygonIntersectionHectares(f, bufferPolygon);
+            addPiece(f);
           }
         } else {
           // Capas de linea, o poligonos sin idField fiable (ver
-          // layers.js): se mide fragmento a fragmento como antes. Para
+          // layers.js): se cuenta fragmento a fragmento como antes. Para
           // lineas el riesgo de doble conteo por margen de tesela es
           // pequeno (solo el tramo solapado en el borde, no la entidad
-          // completa); para los poligonos sin id es una limitacion
-          // conocida, documentada en layers.js capa por capa.
+          // completa); en poligonos la union final lo elimina en la
+          // superficie, aunque el numero de elementos siga siendo aproximado.
           for (const f of intersecting) {
             addName(f);
             count++;
             if (l.geom === "polygon") {
-              totalHa += polygonIntersectionHectares(f, bufferPolygon);
+              addPiece(f);
             } else {
               totalM += lineLengthInsidePolygonMeters(f, bufferPolygon);
             }
           }
         }
+        if (l.geom === "polygon") totalHa = unionAreaHectares(pieces);
 
-        // Sin cruce directo: busca el elemento renderizado mas cercano al
-        // TRAZADO (no al buffer) entre los que trajo la consulta -- todos
-        // estan, por definicion, fuera del buffer en este punto. Se
-        // descarta si el minimo cae fuera del margen de busqueda (puede
-        // pasar si la consulta trajo algo justo en el borde de la vista).
-        if (count === 0) {
-          let min = Infinity;
-          let minName = "";
-          for (const f of feats) {
-            if (!f.geometry) continue;
-            const d = minDistanceMetersToFeature(trazadoSamples, f);
-            if (d < min) {
-              min = d;
-              minName = nameField ? String(f.properties[nameField] ?? "").trim() : "";
-            }
-          }
-          if (isFinite(min) && min <= layerBufferM + NEAREST_SEARCH_MARGIN_M) {
-            nearestM = min;
-            nearestName = minName && !ANALYSIS_PLACEHOLDER_NAMES.has(minName.toLowerCase()) ? minName : "";
-          }
+        // Elementos cercanos FUERA del buffer, tambien cuando la capa ya
+        // tiene cruce directo: hasta NEARBY_MAX_PER_LAYER, el mas cercano
+        // primero, con la distancia al TRAZADO y al borde del buffer.
+        // Antes solo se daba el mas cercano, y solo si no habia cruce
+        // (caso de prueba del puerto de Carboneras, §4.3). Los fragmentos
+        // de un mismo elemento se agrupan (entityKey) y un elemento que
+        // cruza el buffer no se repite aqui aunque otro trozo suyo quede
+        // fuera.
+        const intersectingSet = new Set(intersecting);
+        const intersectingKeys = new Set(intersecting.map((f) => entityKey(l, f)).filter((k) => k != null));
+        const nearestByKey = new Map();
+        for (const f of feats) {
+          if (!f.geometry || intersectingSet.has(f)) continue;
+          // Sin nombre ni id no hay forma de agrupar fragmentos: todos van
+          // a una misma clave y solo se lista el mas cercano de ellos.
+          const key = entityKey(l, f) ?? "__sin_nombre";
+          if (intersectingKeys.has(key)) continue;
+          const d = minDistanceMetersToFeature(trazadoSamples, f);
+          if (!(d <= layerBufferM + NEAREST_SEARCH_MARGIN_M)) continue;
+          const prev = nearestByKey.get(key);
+          if (!prev || d < prev.distanceM) nearestByKey.set(key, { name: featureName(l, f), distanceM: d });
         }
+        const edgeThreshold = bufferEdgeThresholdM(layerBufferM);
+        nearby = [...nearestByKey.values()]
+          .sort((a, b) => a.distanceM - b.distanceM)
+          .slice(0, NEARBY_MAX_PER_LAYER)
+          .map((e) => {
+            // El buffer es el trazado desplazado layerBufferM, asi que la
+            // distancia al borde es la resta (con 0 como minimo por el
+            // pequeno error del muestreo del trazado).
+            const edgeM = Math.max(0, e.distanceM - layerBufferM);
+            return { ...e, edgeM, atEdge: edgeM <= edgeThreshold };
+          });
       }
+      const nearestM = nearby.length ? nearby[0].distanceM : null;
+      const nearestName = nearby.length ? nearby[0].name : null;
       const sensitivity = computeSensitivity(l, { count, nearestM, hasTipoC });
-      results.push({ layer: l, count, totalHa, totalM, names: [...names].sort(), nearestM, nearestName, bufferM: layerBufferM, sensitivity });
+      // Sensibilidad de un elemento solo cercano (un escalon por debajo de
+      // la base), para la tabla de cercanos de una capa que ademas tiene
+      // cruce directo.
+      const nearSensitivity = computeSensitivity(l, { count: 0, nearestM: 0, hasTipoC: false });
+      results.push({
+        layer: l, count, totalHa, totalM, names: [...names].sort(), nearby, nearestM, nearestName,
+        bufferM: layerBufferM, sensitivity, nearSensitivity,
+      });
     }
 
     // Las capas se hicieron temporalmente visibles mas arriba solo para
@@ -465,9 +568,28 @@ async function analyzeUploadedLayer(u, overrides = {}) {
       });
     }
 
+    // Buffers por capa distintos del general del tramo, para las capas con
+    // cruce directo: se dibujan en el mapa (y salen en la leyenda de la
+    // cartografia) para que plano y tabla cuenten lo mismo. Antes el plano
+    // solo mostraba el buffer general, y un elemento "afectado" con un
+    // buffer de 1 km quedaba fuera del circulo dibujado de 500 m (caso de
+    // prueba del puerto de Carboneras, §4.5).
+    const ringsByM = new Map();
+    for (const r of results) {
+      if (r.count === 0 || r.bufferM === u.bufferMeters) continue;
+      if (!ringsByM.has(r.bufferM)) ringsByM.set(r.bufferM, []);
+      ringsByM.get(r.bufferM).push(r.layer);
+    }
+    const rings = [];
+    for (const [meters, layers] of [...ringsByM].sort((a, b) => a[0] - b[0])) {
+      const polygon = computeUnifiedBufferPolygon(u.geojson, meters);
+      if (polygon) rings.push({ meters, layerNames: layers.map((l) => l.nombre.replace(/\s*\([^)]*\)\s*$/, "")), polygon });
+    }
+    setAnalysisBuffers(u, rings);
+
     u.layerBufferOverrides = overrides;
     u.autoActivatedLayers = autoActivated;
-    showAnalysisResults(u, results);
+    showAnalysisResults(u, results, { incomplete });
   } catch (e) {
     console.error(e);
     alert("Error analizando afecciones: " + e.message);
@@ -499,11 +621,34 @@ function sensitivityBadgeHtml(level) {
   return `<span class="sensitivity-badge" style="background:${color}">${escapeHtml(level)}</span>`;
 }
 
-function showAnalysisResults(u, results) {
+function formatMeters(m) {
+  return Math.round(m).toLocaleString("es-ES", { useGrouping: true });
+}
+
+// Texto plano de un elemento cercano, para CSV/Excel/PDF (sin emojis: la
+// fuente del PDF no los tiene).
+function nearbyPlainText(e) {
+  const edge = `${formatMeters(e.edgeM)} m fuera del buffer${e.atEdge ? ", AL BORDE DEL BUFFER" : ""}`;
+  return `${e.name || "Sin nombre"} (${formatMeters(e.distanceM)} m; ${edge})`;
+}
+
+function nearbyHtml(e) {
+  const edge = e.atEdge
+    ? `<span class="analysis-edge-flag">⚠ al borde: ${formatMeters(e.edgeM)} m fuera del buffer</span>`
+    : `<span class="analysis-edge-dist">(${formatMeters(e.edgeM)} m fuera del buffer)</span>`;
+  return `<div class="analysis-nearby-item"><strong>${escapeHtml(e.name || "Sin nombre")}</strong> · ${formatMeters(e.distanceM)} m ${edge}</div>`;
+}
+
+// meta: { incomplete } -- ver analyzeUploadedLayer.
+function showAnalysisResults(u, results, meta = {}) {
   document.getElementById("analysis-subtitle").textContent =
     `${u.name} · buffer de ${bufferLabel(u.bufferMeters)} · estimación de cribado, no sustituye el análisis en QGIS`;
 
   const container = document.getElementById("analysis-results");
+
+  const warningsHtml =
+    (meta.incomplete ? `<p class="modal-note analysis-incomplete-note">⚠️ ${escapeHtml(ANALYSIS_INCOMPLETE_NOTE)}</p>` : "") +
+    `<p class="modal-note analysis-coverage-note">ℹ️ ${escapeHtml(ANALYSIS_COVERAGE_NOTE)}</p>`;
 
   // Aviso de transparencia: que capas se acaban de activar en el panel
   // porque tuvieron cruce directo (ver el bloque "autoActivated" en
@@ -541,7 +686,7 @@ function showAnalysisResults(u, results) {
   for (const nivel of ANALYSIS_NIVELES) {
     const rows = results.filter((r) => r.layer.nivel === nivel);
     const afectadas = rows.filter((r) => r.count > 0);
-    const cercanas = rows.filter((r) => r.count === 0 && r.nearestM != null);
+    const cercanas = rows.filter((r) => r.nearby.length > 0);
     html += `<div class="analysis-nivel-block"><h3>${NIVEL_LABEL[nivel]}</h3>`;
     if (afectadas.length === 0) {
       html += `<p class="analysis-empty">Sin afecciones detectadas en este nivel.</p>`;
@@ -565,24 +710,27 @@ function showAnalysisResults(u, results) {
       html += `</tbody></table>`;
     }
     if (cercanas.length > 0) {
-      html += `<p class="analysis-near-title">Cerca, sin cruce directo (hasta ${(NEAREST_SEARCH_MARGIN_M / 1000).toLocaleString("es-ES")} km más allá del buffer aplicado):</p>`;
+      html += `<p class="analysis-near-title">Cerca, fuera del buffer (hasta ${(NEAREST_SEARCH_MARGIN_M / 1000).toLocaleString("es-ES")} km más allá del buffer aplicado; distancia medida desde el trazado):</p>`;
       html += `<table class="analysis-table analysis-table-near"><thead><tr>
-        <th>Sensibilidad</th><th>Capa</th><th>Elemento más cercano</th><th>Distancia (m)</th><th>Confirmado en campo</th>
+        <th>Sensibilidad</th><th>Capa</th><th>Elementos cercanos</th><th>Confirmado en campo</th>
       </tr></thead><tbody>`;
       for (const r of cercanas) {
+        // Una capa con cruce directo ya tiene su fila (y su estado de campo)
+        // en la tabla de arriba; aqui solo se listan sus elementos de fuera,
+        // con la sensibilidad de "solo cercano".
+        const hasHit = r.count > 0;
         html += `<tr>
-          <td>${sensitivityBadgeHtml(r.sensitivity)}</td>
+          <td>${sensitivityBadgeHtml(hasHit ? r.nearSensitivity : r.sensitivity)}</td>
           <td>${escapeHtml(r.layer.nombre)}</td>
-          <td class="names">${r.nearestName ? escapeHtml(r.nearestName) : "-"}</td>
-          <td class="num">${Math.round(r.nearestM).toLocaleString("es-ES")}</td>
-          <td>${fieldStatusSelectHtml(u, r.layer.id)}</td>
+          <td class="names">${r.nearby.map(nearbyHtml).join("")}</td>
+          <td>${hasHit ? `<span class="analysis-muted">ver tabla de arriba</span>` : fieldStatusSelectHtml(u, r.layer.id)}</td>
         </tr>`;
       }
       html += `</tbody></table>`;
     }
     html += `</div>`;
   }
-  container.innerHTML = autoActivatedHtml + controlsHtml + html;
+  container.innerHTML = warningsHtml + autoActivatedHtml + controlsHtml + html;
 
   container.querySelectorAll(".analysis-field-status").forEach((sel) => {
     sel.addEventListener("change", () => {
@@ -602,7 +750,7 @@ function showAnalysisResults(u, results) {
     analyzeUploadedLayer(u, newOverrides);
   });
 
-  lastAnalysisResults = { u, results };
+  lastAnalysisResults = { u, results, meta };
   document.getElementById("analysis-modal-backdrop").hidden = false;
 }
 
@@ -610,22 +758,26 @@ document.getElementById("analysis-close-btn").addEventListener("click", () => {
   document.getElementById("analysis-modal-backdrop").hidden = true;
 });
 
+// "Elementos cercanos fuera del buffer" lleva el NOMBRE de cada elemento
+// con su distancia -- antes solo salia la distancia del mas cercano, sin
+// decir a que (caso de prueba del puerto de Carboneras, §4.2).
 const RESULTS_HEADER = [
   "Sensibilidad", "Nivel", "Capa", "Fuente", "Buffer aplicado (m)", "Elementos", "Nombres/códigos",
-  "Longitud afectada (m)", "Superficie afectada (ha)", "Distancia al más cercano (m)",
-  "Confirmado en campo",
+  "Longitud afectada (m)", "Superficie afectada (ha)", "Elementos cercanos fuera del buffer",
+  "Distancia al más cercano (m)", "Confirmado en campo",
 ];
 
-// Fila por capa afectada -- o, si no hay cruce directo pero se detecto un
-// elemento cerca (idea #4), una fila con Elementos=0 y la distancia en vez
-// de long./superficie. Tipos ya listos para CSV (todo texto) o Excel
+// Fila por capa afectada -- o, si no hay cruce directo pero se detecto
+// algun elemento cerca (idea #4), una fila con Elementos=0 y los cercanos
+// en vez de long./superficie. Una capa con cruce directo lista tambien sus
+// cercanos de fuera. Tipos ya listos para CSV (todo texto) o Excel
 // (numeros como numeros, no como texto) -- comparten esta funcion para no
 // mantener la logica de "que va en cada columna" por duplicado.
 function resultsToRows(u, results) {
   const fieldStatus = u.fieldStatus || {};
   const rows = [];
   for (const r of results) {
-    if (r.count === 0 && r.nearestM == null) continue;
+    if (r.count === 0 && r.nearby.length === 0) continue;
     rows.push([
       r.sensitivity,
       r.layer.nivel,
@@ -636,11 +788,27 @@ function resultsToRows(u, results) {
       r.names.join(" | "),
       r.totalM > 0 ? Math.round(r.totalM * 10) / 10 : "",
       r.totalHa > 0 ? Math.round(r.totalHa * 1000) / 1000 : "",
+      r.nearby.map(nearbyPlainText).join(" | "),
       r.nearestM != null ? Math.round(r.nearestM) : "",
       fieldStatus[r.layer.id] || FIELD_STATUS_OPTIONS[0],
     ]);
   }
   return rows;
+}
+
+// Notas de metodologia comunes al Excel (hoja "Info") y al informe PDF.
+function analysisNotes(u, meta = {}) {
+  const notes = [];
+  if (meta.incomplete) notes.push(["AVISO", ANALYSIS_INCOMPLETE_NOTE]);
+  notes.push(
+    ["Nota", "Estimación de cribado a partir de teselas vectoriales — no sustituye el análisis en QGIS."],
+    ["Buffer", `Buffer por defecto del tramo: ${bufferLabel(u.bufferMeters)}. Algunas capas pueden usar uno distinto — ver columna 'Buffer aplicado (m)'.`],
+    ["Cercanos", `Elementos fuera del buffer hasta ${NEAREST_SEARCH_MARGIN_M / 1000} km más allá de él (como mucho ${NEARBY_MAX_PER_LAYER} por capa). La distancia se mide desde el trazado; se marca "AL BORDE DEL BUFFER" si queda a menos de 50 m o del 10 % del buffer fuera de su borde.`],
+    ["Cobertura", ANALYSIS_COVERAGE_NOTE],
+    ["Fuente y vigencia", "Cada capa indica su organismo de origen en la columna 'Fuente'. Confirmar la fecha de descarga vigente del catálogo con el equipo antes de una entrega final."],
+    ["Sensibilidad", "Criterio interno de Quadrante (Muy Alta/Alta/Media/Baja), no una clasificación reglamentaria — pensado para priorizar qué hallazgo revisar primero, no sustituye el criterio del técnico ambiental."]
+  );
+  return notes;
 }
 
 function csvField(s) {
@@ -679,7 +847,7 @@ document.getElementById("analysis-download-xlsx").addEventListener("click", asyn
   // Mismo criterio que resultsToRows: afectadas de verdad + "cerca, sin
   // cruce directo" (idea #4) -- en ese mismo orden, para que fila a fila
   // coincida uno a uno con `rows`.
-  const exportable = results.filter((r) => r.count > 0 || r.nearestM != null);
+  const exportable = results.filter((r) => r.count > 0 || r.nearby.length > 0);
   const rows = resultsToRows(u, results); // mismo filtro/orden que `exportable`
 
   // Color como columna aparte (idea #10: capa + fuente citables sin salir
@@ -688,10 +856,11 @@ document.getElementById("analysis-download-xlsx").addEventListener("click", asyn
   // Sensibilidad (idea #1) va primero, es lo primero que hay que mirar.
   const header = [
     "Sensibilidad", "Nivel", "Capa", "Color", "Fuente", "Buffer aplicado (m)", "Elementos", "Nombres/códigos",
-    "Longitud afectada (m)", "Superficie afectada (ha)", "Distancia al más cercano (m)", "Confirmado en campo",
+    "Longitud afectada (m)", "Superficie afectada (ha)", "Elementos cercanos fuera del buffer",
+    "Distancia al más cercano (m)", "Confirmado en campo",
   ];
-  const tableRows = rows.map(([sensibilidad, nivel, capa, fuente, bufferM, count, nombres, m, ha, dist, estado]) => [
-    sensibilidad, nivel, capa, "", fuente, bufferM, count, nombres, m, ha, dist, estado,
+  const tableRows = rows.map(([sensibilidad, nivel, capa, fuente, bufferM, count, nombres, m, ha, cercanos, dist, estado]) => [
+    sensibilidad, nivel, capa, "", fuente, bufferM, count, nombres, m, ha, cercanos, dist, estado,
   ]);
 
   const workbook = new ExcelJS.Workbook();
@@ -709,7 +878,7 @@ document.getElementById("analysis-download-xlsx").addEventListener("click", asyn
     rows: tableRows,
   });
 
-  [14, 6, 34, 4, 24, 12, 10, 45, 16, 16, 16, 20].forEach((w, i) => {
+  [14, 6, 34, 4, 24, 12, 10, 45, 16, 16, 60, 16, 20].forEach((w, i) => {
     sheet.getColumn(i + 1).width = w;
   });
 
@@ -732,9 +901,10 @@ document.getElementById("analysis-download-xlsx").addEventListener("click", asyn
     row.getCell(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: sensColor } };
     row.getCell(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
     row.getCell(8).alignment = { wrapText: true, vertical: "top" };
-    // Fila "cerca, sin cruce directo" (Elementos=0 con distancia): en
+    row.getCell(11).alignment = { wrapText: true, vertical: "top" };
+    // Fila "cerca, sin cruce directo" (Elementos=0 con cercanos): en
     // cursiva para distinguirla de un cruce real de un vistazo.
-    if (r.count === 0 && r.nearestM != null) {
+    if (r.count === 0) {
       row.eachCell((cell) => { cell.font = { ...(cell.font || {}), italic: true }; });
     }
   });
@@ -745,13 +915,8 @@ document.getElementById("analysis-download-xlsx").addEventListener("click", asyn
   infoSheet.getColumn(1).width = 16;
   infoSheet.getColumn(1).font = { bold: true };
   infoSheet.getColumn(2).width = 90;
-  infoSheet.addRows([
-    ["Tramo/punto", u.name],
-    ["Buffer aplicado", bufferLabel(u.bufferMeters) + " (por defecto -- ver columna 'Buffer aplicado (m)' de la tabla, algunas capas pueden usar uno distinto)"],
-    ["Nota", "Estimación de cribado a partir de teselas vectoriales -- no sustituye el análisis en QGIS. Ver README del proyecto."],
-    ["Fuente y vigencia", "Cada capa indica su organismo de origen en la columna 'Fuente'. El catálogo se descarga periódicamente del origen oficial (MITECO/IGN/REDIAM/CNIG según capa) -- confirmar la fecha de descarga vigente con el equipo antes de una entrega final."],
-    ["Sensibilidad", "Criterio interno de Quadrante (Muy Alta/Alta/Media/Baja), no una clasificación reglamentaria -- pensado para priorizar qué hallazgo revisar primero, no sustituye el criterio del técnico ambiental."],
-  ]);
+  infoSheet.addRows([["Tramo/punto", u.name], ...analysisNotes(u, lastAnalysisResults.meta)]);
+  infoSheet.getColumn(2).alignment = { wrapText: true, vertical: "top" };
 
   const buf = await workbook.xlsx.writeBuffer();
   const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });

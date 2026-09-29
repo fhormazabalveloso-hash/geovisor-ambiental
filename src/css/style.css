@@ -788,6 +788,48 @@ html, body {
   margin: 0 0 10px;
 }
 
+/* Resultado posiblemente incompleto (tope de espera agotado) -- ver
+   ANALYSIS_INCOMPLETE_NOTE en analysis.js. */
+.analysis-incomplete-note {
+  background: #FFEBEE;
+  border: 1px solid #EF9A9A;
+  border-radius: 4px;
+  color: #B71C1C;
+  font-weight: 600;
+  padding: 6px 10px;
+  margin: 0 0 10px;
+}
+
+/* Hueco de datos conocido (DPMT, habitats marinos) -- ver
+   ANALYSIS_COVERAGE_NOTE en analysis.js. */
+.analysis-coverage-note {
+  background: #F3F6FA;
+  border: 1px solid #D5DEEA;
+  border-radius: 4px;
+  color: #455A64;
+  padding: 6px 10px;
+  margin: 0 0 10px;
+}
+
+.analysis-nearby-item + .analysis-nearby-item {
+  margin-top: 3px;
+}
+
+.analysis-edge-dist {
+  color: #888;
+}
+
+.analysis-edge-flag {
+  color: #B71C1C;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.analysis-muted {
+  color: #999;
+  font-style: italic;
+}
+
 .modal-actions {
   display: flex;
   justify-content: flex-end;
