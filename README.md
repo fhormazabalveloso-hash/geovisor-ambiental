@@ -690,10 +690,20 @@ Este documento se centra en el **Componente 1**.
   Probado a medias (la ventana estaba minimizada y el mapa no dibujaba, así
   que solo salieron completas las capas en línea y las ya cargadas):
   Manzanares da las zonas inundables y el DPH como afección directa, y
-  Carboneras las zonas inundables cercanas como "en el entorno". **Pendiente
-  para el 30/09: probar los cuatro casos con la ventana abierta**, en
-  especial el Islote de San Andrés en Carboneras, y revisar el modal y el
-  informe.
+  Carboneras las zonas inundables cercanas como "en el entorno".
+
+  **Prueba completa (2026-10-01)** de cerramiento, Manzanares, Carboneras
+  (500 m y 1 km) y Córdoba 58 km: sin errores y con resultados coherentes
+  (p. ej. Córdoba: Red Natura Muy Alta, "17.493 m de trazado dentro · 0,42 %
+  de Guadiato-Bembézar"; Carboneras 1 km: Islote Alta, "en el entorno · 70 %
+  del espacio"). Ajustes que salieron de la prueba:
+  - Nuevo caso **"al borde del buffer (a verificar)"**: fuera del buffer
+    pero a menos de 50 m o del 10 % de su borde cuenta como en el entorno,
+    simétrico al roce (el Islote, a 7 m del borde con 500 m, salía Media).
+  - En el modal, los resultados van antes que los controles de buffer.
+  - En el informe, la fuente va bajo el nombre de la capa, las columnas de
+    longitud y superficie se ensanchan y la fecha sale como 01/10/2026.
+  - Excel verificado: 17 columnas, con los colores de capa y de semáforo.
 
 ---
 

@@ -456,10 +456,17 @@ function minDistanceMetersToFeature(ctx, feature, limitM = Infinity) {
 const DIRECT_MIN_M = 25;
 const DIRECT_MIN_HA = 0.1;
 
+// "borde": fuera del buffer pero al borde (bufferEdgeThresholdM: menos de
+// 50 m o del 10 % del buffer). Simetrico al roce: tan cerca que la
+// diferencia puede ser precision del dato, asi que cuenta como en el
+// entorno y se marca "a verificar" (prueba completa del 2026-10-01: el
+// Islote de San Andres, a 7 m del borde de un buffer de 500 m, salia
+// "Media, proximo" y se perdia el aviso de "al borde" que ya habia).
 const AFECCION_LABEL = {
   directa: "Directa",
   roce: "Roce (a verificar)",
   entorno: "En el entorno",
+  borde: "Al borde del buffer (a verificar)",
   proxima: "Próxima",
 };
 
@@ -467,8 +474,8 @@ function sensitivityFor(importancia, afeccion) {
   let idx = IMPORTANCIA_LEVELS.indexOf(importancia);
   if (idx === -1) idx = IMPORTANCIA_LEVELS.indexOf("Media");
   // Los indices de IMPORTANCIA_LEVELS (Baja 0, Media 1, Alta 2) coinciden con
-  // los de SENSITIVITY_LEVELS para "en el entorno"; directa sube uno y
-  // proxima baja uno.
+  // los de SENSITIVITY_LEVELS para "en el entorno" (y roce y borde); directa
+  // sube uno y proxima baja uno.
   const shift = afeccion === "directa" ? 1 : afeccion === "proxima" ? -1 : 0;
   return SENSITIVITY_LEVELS[Math.max(0, Math.min(SENSITIVITY_LEVELS.length - 1, idx + shift))];
 }
@@ -558,6 +565,7 @@ function sensitivityReason(r) {
   if (r.afeccion === "directa") how = `la obra lo pisa: ${r.contact.text}`;
   else if (r.afeccion === "roce") how = `roce con la obra (${r.contact.text}), a verificar: puede deberse a la precisión del dato`;
   else if (r.afeccion === "entorno") how = `en el entorno: dentro del buffer de ${bufferLabel(r.bufferM)}, la obra no lo pisa`;
+  else if (r.afeccion === "borde") how = `al borde del buffer: ${r.nearby[0].name || "un elemento"} a ${formatMeters(r.nearestM)} m del trazado, solo ${formatMeters(r.nearby[0].edgeM)} m fuera del buffer de ${bufferLabel(r.bufferM)}; se trata como dentro, a verificar`;
   else how = `próximo: a ${formatMeters(r.nearestM)} m del trazado, fuera del buffer de ${bufferLabel(r.bufferM)}`;
   let cuanto = "";
   if (r.count > 0 && r.totalHa > 0) cuanto = `${formatHa(r.totalHa)} ha dentro del buffer${r.pctText ? ` (${r.pctText})` : ""}`;
@@ -795,7 +803,7 @@ async function analyzeUploadedLayer(u, overrides = {}) {
       const afeccion =
         contact ? contact.kind
         : count > 0 ? "entorno"
-        : nearestM != null ? "proxima"
+        : nearestM != null ? (nearby[0].atEdge ? "borde" : "proxima")
         : null;
       const importancia = l.importancia || "Media";
       const sensitivity = afeccion ? sensitivityFor(importancia, afeccion) : null;
@@ -963,7 +971,7 @@ function showAnalysisResults(u, results, meta = {}) {
   let autoActivatedHtml = "";
   if (u.autoActivatedLayers && u.autoActivatedLayers.length > 0) {
     const nombres = u.autoActivatedLayers.map((l) => escapeHtml(l.nombre)).join(", ");
-    autoActivatedHtml = `<p class="modal-note analysis-autoactivated-note">✅ Se han activado en el mapa (panel de capas) las que tienen cruce directo y no estaban ya marcadas: ${nombres} -- así la cartografía que exportes las va a incluir. Desactívalas a mano si no las quieres en el plano.</p>`;
+    autoActivatedHtml = `<p class="modal-note analysis-autoactivated-note">✅ Se han activado en el mapa las capas con algo dentro del buffer que no estaban ya marcadas (${nombres}), para que la cartografía que exportes las incluya. Desactívalas en el panel si no las quieres en el plano.</p>`;
   }
 
   // Buffer por capa (idea #2): por defecto el del tramo, salvo que la
@@ -999,7 +1007,7 @@ function showAnalysisResults(u, results, meta = {}) {
       <tr><th>Baja</th><td>${sensitivityBadgeHtml("Media")}</td><td>${sensitivityBadgeHtml("Baja")}</td><td>${sensitivityBadgeHtml("Baja")}</td></tr>
     </tbody></table>
     <p><strong>Importancia alta:</strong> Red Natura 2000, espacios naturales protegidos, zonas húmedas, humedales y turberas, zona de flujo preferente, zona inundable T10. <strong>Media:</strong> dominio público hidráulico, cauces, vías pecuarias, zonas inundables T100/T500 y costeras.</p>
-    <p>Si la obra lo pisa menos de ${DIRECT_MIN_M} m o ${formatHa(DIRECT_MIN_HA)} ha, se marca <em>roce, a verificar</em> y cuenta como "en el entorno": puede deberse a la precisión del dato. El "cuánto" (ha, m, % del espacio) se da siempre en el porqué de cada fila. Criterio interno de Quadrante, no una clasificación reglamentaria.</p>
+    <p>Si la obra lo pisa menos de ${DIRECT_MIN_M} m o ${formatHa(DIRECT_MIN_HA)} ha (<em>roce</em>), o si queda fuera del buffer pero a menos de 50 m o del 10 % de su borde (<em>al borde</em>), cuenta como "en el entorno" y se marca <em>a verificar</em>: la diferencia puede deberse a la precisión del dato. El "cuánto" (ha, m, % del espacio) se da siempre en el porqué de cada fila. Criterio interno de Quadrante, no una clasificación reglamentaria.</p>
   </details>`;
 
   let html = "";
@@ -1052,7 +1060,11 @@ function showAnalysisResults(u, results, meta = {}) {
     }
     html += `</div>`;
   }
-  container.innerHTML = warningsHtml + autoActivatedHtml + methodHtml + controlsHtml + html;
+  // Primero lo que se quiere ver (resultados y como se decide), y despues los
+  // controles para recalcular con otros buffers (prueba del 2026-10-01: con
+  // los controles delante, los resultados quedaban fuera de la primera
+  // pantalla).
+  container.innerHTML = warningsHtml + methodHtml + html + controlsHtml + autoActivatedHtml;
 
   container.querySelectorAll(".analysis-field-status").forEach((sel) => {
     sel.addEventListener("change", () => {
@@ -1093,8 +1105,9 @@ const RESULTS_HEADER = [
 ];
 // Columnas del informe PDF (A4 apaisado, no caben las 16): indices de
 // RESULTS_HEADER y ancho en mm. El contacto con la obra va dentro del motivo.
+// (Longitud y Superficie a 17 mm: con 14 el titulo se partia a media palabra.)
 const REPORT_COLUMNS = [
-  [0, 18], [4, 26], [1, 18], [8, 34], [10, 14], [11, 14], [12, 44], [14, 78], [15, 17],
+  [0, 18], [4, 26], [1, 18], [8, 33], [10, 17], [11, 17], [12, 40], [14, 75], [15, 17],
 ];
 
 // Fila por capa afectada -- o, si no hay cruce directo pero se detecto
@@ -1145,8 +1158,8 @@ function analysisNotes(u, meta = {}) {
     ["Cercanos", `Elementos fuera del buffer hasta ${NEAREST_SEARCH_MARGIN_M / 1000} km más allá de él (como mucho ${NEARBY_MAX_PER_LAYER} por capa). La distancia se mide desde el trazado; se marca "AL BORDE DEL BUFFER" si queda a menos de 50 m o del 10 % del buffer fuera de su borde.`],
     ["Cobertura", ANALYSIS_COVERAGE_NOTE],
     ["Zonas inundables", `${ANALYSIS_FLOOD_COVERAGE_NOTE} Se consultan en vivo al servicio del SNCZI (MITECO) en el momento del análisis; geometría con precisión de ~10 m.`],
-    ["Fuente y vigencia", "Cada capa indica su organismo de origen en la columna 'Fuente'. Confirmar la fecha de descarga vigente del catálogo con el equipo antes de una entrega final."],
-    ["Sensibilidad", `Combina la importancia del elemento (según su régimen legal) con cómo lo toca la obra. Importancia alta: Muy Alta si la obra lo pisa, Alta si solo está en el buffer, Media si está cerca. Importancia media: Alta / Media / Baja. Si la obra lo pisa menos de ${DIRECT_MIN_M} m o ${formatHa(DIRECT_MIN_HA)} ha se marca "roce, a verificar" y cuenta como en el buffer. Criterio interno de Quadrante, no una clasificación reglamentaria: sirve para priorizar qué revisar primero y no sustituye el criterio del técnico ambiental.`]
+    ["Fuente y vigencia", "Cada capa indica su organismo de origen (columna 'Fuente' en el Excel; debajo del nombre de la capa en el informe). Confirmar la fecha de descarga vigente del catálogo con el equipo antes de una entrega final."],
+    ["Sensibilidad", `Combina la importancia del elemento (según su régimen legal) con cómo lo toca la obra. Importancia alta: Muy Alta si la obra lo pisa, Alta si solo está en el buffer, Media si está cerca. Importancia media: Alta / Media / Baja. Si la obra lo pisa menos de ${DIRECT_MIN_M} m o ${formatHa(DIRECT_MIN_HA)} ha ("roce"), o queda fuera del buffer a menos de 50 m o del 10 % de su borde ("al borde"), cuenta como en el buffer y se marca "a verificar". Criterio interno de Quadrante, no una clasificación reglamentaria: sirve para priorizar qué revisar primero y no sustituye el criterio del técnico ambiental.`]
   );
   return notes;
 }

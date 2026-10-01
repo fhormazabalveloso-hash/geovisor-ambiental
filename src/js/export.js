@@ -1225,7 +1225,7 @@ function buildReportPdf() {
   pdf.text(
     [
       `Proyecto: ${proyecto}`,
-      `Tramo/punto analizado: ${u.name}  ·  Buffer por defecto: ${bufferLabel(u.bufferMeters)}  ·  Fecha: ${new Date().toLocaleDateString("es-ES")}`,
+      `Tramo/punto analizado: ${u.name}  ·  Buffer por defecto: ${bufferLabel(u.bufferMeters)}  ·  Fecha: ${new Date().toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit", year: "numeric" })}`,
     ],
     marginX,
     23
@@ -1250,9 +1250,14 @@ function buildReportPdf() {
   // Solo las columnas de REPORT_COLUMNS (analysis.js): las 16 del Excel no
   // caben en A4 apaisado.
   const rows = resultsToRows(u, results);
+  // La fuente va debajo del nombre de la capa (no hay sitio para su propia
+  // columna), para que el informe siga siendo citable.
+  const CAPA_IDX = RESULTS_HEADER.indexOf("Capa");
+  const FUENTE_IDX = RESULTS_HEADER.indexOf("Fuente");
   const body = rows.map((row) =>
     REPORT_COLUMNS.map(([idx]) => {
       const v = row[idx];
+      if (idx === CAPA_IDX && row[FUENTE_IDX]) return `${v}\n(${row[FUENTE_IDX]})`;
       if (v === "" || v == null) return "-";
       if (typeof v === "number") return v.toLocaleString("es-ES");
       return String(v);

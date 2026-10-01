@@ -277,7 +277,7 @@ const LAYERS = [
     nombre: "Humedales y turberas",
     fuente: "MITECO (complementario a IEZH, vigencia/validez por confirmar)",
     importancia: "Alta",
-    importanciaMotivo: "hábitat húmedo sensible (vigencia del dato por confirmar)",
+    importanciaMotivo: "hábitat húmedo sensible; vigencia del dato por confirmar",
     tematica: "hidrografia",
     nivel: 2,
     sourceLayer: "Humedal_TurberaBCAM2_2025",
