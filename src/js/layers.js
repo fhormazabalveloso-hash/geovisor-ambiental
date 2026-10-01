@@ -68,7 +68,7 @@
 // protegidos y rios); en el panel van en su propio grupo, despues de
 // hidrografia (ver TEMATICA_ORDER). Solo existen para los tramos estudiados
 // por el SNCZI -- ver ANALYSIS_FLOOD_COVERAGE_NOTE en analysis.js.
-const SNCZI_FUENTE = "MITECO - SNCZI (servicio en línea)";
+const SNCZI_FUENTE = "MITECO - SNCZI, servicio en línea";
 const FLOOD_LAYERS = [
   {
     id: "zi_costera_t500",

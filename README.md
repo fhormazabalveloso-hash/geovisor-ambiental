@@ -705,6 +705,19 @@ Este documento se centra en el **Componente 1**.
     longitud y superficie se ensanchan y la fecha sale como 01/10/2026.
   - Excel verificado: 17 columnas, con los colores de capa y de semáforo.
 
+  Segunda tanda de pruebas el mismo día, todo correcto:
+  - Informe PDF corregido revisado: fecha, cabeceras y fuente bajo la capa.
+  - Cambio de mapa base PNOA ↔ OSM: se conservan las zonas inundables
+    cargadas, el tramo y el anillo de análisis.
+  - Umbrales con geometría de control: 24 m → roce y 26 m → directa;
+    0,09 ha → roce y 0,11 ha → directa; punto dentro → directa; cauce
+    cruzado → directa.
+  - Subida de KML con punto y línea a la vez.
+  - Matriz completa importancia × afección.
+
+  La fuente de las zonas inundables pasa a "MITECO - SNCZI, servicio en
+  línea", para no anidar paréntesis bajo el nombre de la capa en el informe.
+
 ---
 
 ## 3. Arquitectura objetivo
