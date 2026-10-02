@@ -913,6 +913,10 @@ html, body {
   color: #444;
 }
 
+.analysis-limits .analysis-coverage-note {
+  margin: 6px 0 0;
+}
+
 .analysis-method summary {
   cursor: pointer;
   font-weight: 600;

@@ -335,7 +335,7 @@ function buildUploadPanel() {
     // (bug preexistente: document.getElementById devolvia null y
     // appendChild(null) lanzaba TypeError la segunda vez que se llegaba a
     // 0 tramos) rompia al quitar todos los tramos subidos.
-    panel.innerHTML = `<p id="upload-panel-empty">Sin tramos subidos todavía.</p>`;
+    panel.innerHTML = `<p id="upload-panel-empty">Sube un KMZ, KML, GeoJSON o SHP (.zip) para empezar.</p>`;
     if (map.getSource("upload-overlaps")) map.getSource("upload-overlaps").setData({ type: "FeatureCollection", features: [] });
     return;
   }

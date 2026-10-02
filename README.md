@@ -734,6 +734,12 @@ Este documento se centra en el **Componente 1**.
     asistida con IA, el buffer propio por capa en los resultados y el
     solapamiento entre tramos. El modo completo se ve añadiendo
     `?modo=completo` a la URL.
+  - **Retoques para la presentación (2026-10-02):** el pie dice "Versión
+    piloto"; el panel de tramos vacío indica qué formatos se pueden subir;
+    en los resultados, las limitaciones fijas del catálogo (costas, zonas
+    inundables no estudiadas) pasan a un desplegable "Limitaciones de este
+    análisis" para que el semáforo sea lo primero que se ve. Los avisos de
+    fallo de un análisis concreto siguen siempre a la vista.
   - **Panel de capas (2026-10-02, pedido por Francisco):** casilla "Todas
     las capas" arriba y una casilla en el título de cada grupo para
     encender o apagar todas sus capas de una vez, además de capa a capa. La

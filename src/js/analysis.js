@@ -983,8 +983,14 @@ function showAnalysisResults(u, results, meta = {}) {
   const warningsHtml =
     (meta.incomplete ? `<p class="modal-note analysis-incomplete-note">⚠️ ${escapeHtml(ANALYSIS_INCOMPLETE_NOTE)}</p>` : "") +
     (serviceErrors ? `<p class="modal-note analysis-incomplete-note">⚠️ ${escapeHtml(serviceErrors)}</p>` : "") +
-    (truncatedText ? `<p class="modal-note analysis-incomplete-note">⚠️ ${escapeHtml(truncatedText)}</p>` : "") +
-    `<p class="modal-note analysis-coverage-note">ℹ️ ${escapeHtml(ANALYSIS_COVERAGE_NOTE)} ${escapeHtml(ANALYSIS_FLOOD_COVERAGE_NOTE)}</p>`;
+    (truncatedText ? `<p class="modal-note analysis-incomplete-note">⚠️ ${escapeHtml(truncatedText)}</p>` : "");
+  // Las limitaciones fijas del catalogo van plegadas: salen en todos los
+  // analisis y tapaban el semaforo al abrir el resultado. Los avisos de
+  // arriba (fallos de este analisis concreto) siguen siempre a la vista.
+  const limitsHtml = `<details class="analysis-method analysis-limits">
+    <summary>Limitaciones de este análisis</summary>
+    <p class="modal-note analysis-coverage-note">ℹ️ ${escapeHtml(ANALYSIS_COVERAGE_NOTE)} ${escapeHtml(ANALYSIS_FLOOD_COVERAGE_NOTE)}</p>
+  </details>`;
 
   // Aviso de transparencia: que capas se acaban de activar en el panel
   // porque tuvieron cruce directo (ver el bloque "autoActivated" en
@@ -1089,7 +1095,7 @@ function showAnalysisResults(u, results, meta = {}) {
   // pantalla).
   // El buffer propio por capa (controlsHtml) solo en el modo completo (ver
   // config.js); en el basico se usan el del tramo y los sugeridos por capa.
-  container.innerHTML = warningsHtml + methodHtml + html + (FEATURES.bufferPorCapa ? controlsHtml : "") + autoActivatedHtml;
+  container.innerHTML = warningsHtml + methodHtml + limitsHtml + html + (FEATURES.bufferPorCapa ? controlsHtml : "") + autoActivatedHtml;
 
   container.querySelectorAll(".analysis-field-status").forEach((sel) => {
     sel.addEventListener("change", () => {
