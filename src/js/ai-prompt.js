@@ -177,6 +177,9 @@ const aiCopyStatus = document.getElementById("ai-copy-status");
 
 aiWorkTypeSelect.innerHTML = AI_WORK_TYPES.map((t) => `<option value="${t.value}">${t.label}</option>`).join("");
 
+// Solo en el modo completo (ver config.js).
+document.getElementById("analysis-ai-btn").hidden = !FEATURES.redactarIA;
+
 function refreshAiPrompt() {
   if (!lastAnalysisResults) return;
   const { u, results, meta } = lastAnalysisResults;

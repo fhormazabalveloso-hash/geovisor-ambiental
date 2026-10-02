@@ -341,7 +341,7 @@ function buildUploadPanel() {
   }
 
   let html = "";
-  if (uploadedLayers.length >= 2) {
+  if (uploadedLayers.length >= 2 && FEATURES.solapamiento) {
     html += `<div class="upload-overlap-section">
       <button id="upload-overlap-btn" class="upload-overlap-btn">🔗 Ver solapamientos entre buffers</button>
       <div id="upload-overlap-results" hidden></div>

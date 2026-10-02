@@ -484,12 +484,34 @@ function formatHa(ha) {
   return ha.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+function bboxOverlap(a, b) {
+  return a[0] <= b[2] && a[2] >= b[0] && a[1] <= b[3] && a[3] >= b[1];
+}
+
+// "¿Toca f este poligono?" rapido para poligonos de muchas partes (el buffer
+// de varios tramos separados). turf.booleanIntersects contra el poligono
+// entero era el 70 % del tiempo del analisis (57 de 81 s) en una oferta de
+// 16 tramos de cerramiento repartidos en ~100 km (prueba del 2026-10-01):
+// cada elemento de la vista se comparaba con las 16 partes a la vez, aunque
+// estuviera a 50 km de todas. Ahora se descarta primero por rectangulo
+// envolvente y solo se compara con las partes cercanas.
+function makeIntersector(polygonFeature) {
+  const parts = turf.flatten(polygonFeature).features
+    .filter((p) => p.geometry)
+    .map((p) => ({ feature: p, bbox: turf.bbox(p) }));
+  return (f) => {
+    const fb = turf.bbox(f);
+    return parts.some((p) => bboxOverlap(fb, p.bbox) && turf.booleanIntersects(f, p.feature));
+  };
+}
+
 // Partes simples de la geometria subida, separadas por tipo, una vez por
 // analisis.
 function trazadoParts(geojson) {
   const parts = turf.flatten(geojson).features.filter((f) => f.geometry);
   return {
     all: parts,
+    touches: makeIntersector({ type: "FeatureCollection", features: parts }),
     lines: parts.filter((f) => f.geometry.type === "LineString"),
     polys: parts.filter((f) => f.geometry.type === "Polygon"),
     points: parts.filter((f) => f.geometry.type === "Point"),
@@ -505,7 +527,7 @@ function trazadoParts(geojson) {
 // - capa de lineas: veces que la obra cruza el elemento, o metros del
 //   elemento dentro de la huella.
 function directContactForLayer(l, entities, traz, ctx) {
-  const touching = entities.filter((e) => traz.all.some((p) => turf.booleanIntersects(p, e.feature)));
+  const touching = entities.filter((e) => traz.touches(e.feature));
   if (touching.length === 0) return null;
   const names = [...new Set(touching.map((e) => e.name).filter(Boolean))].sort();
   const parts = [];
@@ -683,7 +705,8 @@ async function analyzeUploadedLayer(u, overrides = {}) {
       const wfsResult = l.wfs ? wfsResults[l.id] : null;
       if (existing.length) {
         const feats = wfsResult ? wfsResult.features : map.queryRenderedFeatures(undefined, { layers: existing });
-        const intersecting = feats.filter((f) => f.geometry && turf.booleanIntersects(f, bufferPolygon));
+        const touchesBuffer = makeIntersector(bufferPolygon);
+        const intersecting = feats.filter((f) => f.geometry && touchesBuffer(f));
 
         // Elementos que caen en el buffer: { feature, name, props, bufferHa }.
         // Sirven para la superficie, los nombres, el % del espacio y el
@@ -1064,7 +1087,9 @@ function showAnalysisResults(u, results, meta = {}) {
   // controles para recalcular con otros buffers (prueba del 2026-10-01: con
   // los controles delante, los resultados quedaban fuera de la primera
   // pantalla).
-  container.innerHTML = warningsHtml + methodHtml + html + controlsHtml + autoActivatedHtml;
+  // El buffer propio por capa (controlsHtml) solo en el modo completo (ver
+  // config.js); en el basico se usan el del tramo y los sugeridos por capa.
+  container.innerHTML = warningsHtml + methodHtml + html + (FEATURES.bufferPorCapa ? controlsHtml : "") + autoActivatedHtml;
 
   container.querySelectorAll(".analysis-field-status").forEach((sel) => {
     sel.addEventListener("change", () => {
@@ -1076,7 +1101,7 @@ function showAnalysisResults(u, results, meta = {}) {
     });
   });
 
-  container.querySelector("#analysis-recalc-btn").addEventListener("click", () => {
+  container.querySelector("#analysis-recalc-btn")?.addEventListener("click", () => {
     const newOverrides = {};
     container.querySelectorAll(".analysis-buffer-select").forEach((sel) => {
       newOverrides[sel.dataset.layerId] = Number(sel.value);

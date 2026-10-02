@@ -365,11 +365,16 @@ function buildLayerPanel() {
   for (const t of TEMATICA_ORDER) porTematica[t] = [];
   for (const l of LAYERS) porTematica[l.tematica].push(l);
 
-  let html = "";
+  // Encender/apagar de golpe: todas las capas (arriba) o las de un grupo (en
+  // su titulo), ademas de capa a capa (pedido por Francisco, 2026-10-02).
+  // Estas casillas se marcan con un guion (indeterminate) si solo estan
+  // encendidas algunas -- ver syncGroupToggles.
+  let html = `<label class="all-layers-toggle"><input type="checkbox" id="all-layers-toggle"> Todas las capas</label>`;
   for (const tematica of TEMATICA_ORDER) {
     const capas = porTematica[tematica].slice().reverse();
     if (capas.length === 0) continue;
-    html += `<div class="tematica-group"><h3>${TEMATICA_LABEL[tematica]}</h3>`;
+    html += `<div class="tematica-group"><h3><label class="tematica-toggle-label" title="Encender o apagar todas las capas de este grupo">
+      <input type="checkbox" class="tematica-toggle" data-tematica="${tematica}"> ${TEMATICA_LABEL[tematica]}</label></h3>`;
     capas.forEach((l, i) => {
       const checked = layerVisible[l.id] ? "checked" : "";
       const opacityPct = Math.round(layerOpacity[l.id] * 100);
@@ -403,12 +408,40 @@ function buildLayerPanel() {
   }
   panel.innerHTML = html;
 
+  // Estado de las casillas de grupo y de "Todas": marcada si todas sus capas
+  // estan encendidas, con guion si solo algunas. Las casillas de capa se
+  // ajustan tambien (la exportacion lee su estado, ver export.js).
+  const syncGroupToggles = () => {
+    panel.querySelectorAll(".layer-toggle").forEach((cb) => {
+      cb.checked = !!layerVisible[cb.dataset.id];
+    });
+    const setState = (cb, layers) => {
+      const on = layers.filter((l) => layerVisible[l.id]).length;
+      cb.checked = on === layers.length;
+      cb.indeterminate = on > 0 && on < layers.length;
+    };
+    panel.querySelectorAll(".tematica-toggle").forEach((cb) => {
+      setState(cb, LAYERS.filter((l) => l.tematica === cb.dataset.tematica));
+    });
+    setState(panel.querySelector("#all-layers-toggle"), LAYERS);
+  };
+  const setMany = (layers, visible) => {
+    for (const l of layers) if (!!layerVisible[l.id] !== visible) setLayerVisible(l, visible);
+    syncGroupToggles();
+  };
+
+  panel.querySelector("#all-layers-toggle").addEventListener("change", (e) => setMany(LAYERS, e.target.checked));
+  panel.querySelectorAll(".tematica-toggle").forEach((cb) => {
+    cb.addEventListener("change", () => setMany(LAYERS.filter((l) => l.tematica === cb.dataset.tematica), cb.checked));
+  });
   panel.querySelectorAll(".layer-toggle").forEach((cb) => {
     cb.addEventListener("change", () => {
       const layer = LAYERS.find((l) => l.id === cb.dataset.id);
       setLayerVisible(layer, cb.checked);
+      syncGroupToggles();
     });
   });
+  syncGroupToggles();
   panel.querySelectorAll(".layer-opacity").forEach((sl) => {
     sl.addEventListener("input", () => {
       const layer = LAYERS.find((l) => l.id === sl.dataset.id);

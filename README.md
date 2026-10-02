@@ -718,6 +718,32 @@ Este documento se centra en el **Componente 1**.
   La fuente de las zonas inundables pasa a "MITECO - SNCZI, servicio en
   línea", para no anidar paréntesis bajo el nombre de la capa en el informe.
 
+- **2026-10-01 - Primera oferta real: 16 tramos separados.** KMZ de una
+  oferta real de cerramiento (datos de la licitación omitidos): 16 tramos
+  con 23,3 km en total y 16 puntos de PK, repartidos en unos 100 km. El KMZ
+  se leyó bien, pero el análisis tardó
+  **134 s con la página congelada**. Medido: el 70 % era
+  `turf.booleanIntersects` comparando cada elemento de la vista con el buffer
+  entero de los 16 tramos. Arreglo (`makeIntersector`): descarte por
+  rectángulo envolvente y comparación solo con la parte cercana. Ahora tarda
+  **7,5 s**, con el mismo resultado.
+  - **Modo básico para la primera presentación (2026-10-02, decisión de
+    Francisco):** se publica un modelo básico pero funcional; el resto se
+    reserva para más adelante (concurso). Un solo código con funciones
+    activables (`src/js/config.js`). El modo básico oculta la redacción
+    asistida con IA, el buffer propio por capa en los resultados y el
+    solapamiento entre tramos. El modo completo se ve añadiendo
+    `?modo=completo` a la URL.
+  - **Panel de capas (2026-10-02, pedido por Francisco):** casilla "Todas
+    las capas" arriba y una casilla en el título de cada grupo para
+    encender o apagar todas sus capas de una vez, además de capa a capa. La
+    casilla de grupo o de "Todas" muestra un guion si solo hay algunas
+    encendidas. Probado con clics reales.
+  - **Pendiente, detectado con este caso:** el resultado agrupa los 16 tramos
+    y no dice cuál toca qué. Además, con tramos tan dispersos el análisis
+    trabaja a zoom 8,8 (más simplificación en las capas locales; probado
+    solo hasta ~60 km). Propuesta: análisis **por tramo**.
+
 ---
 
 ## 3. Arquitectura objetivo
