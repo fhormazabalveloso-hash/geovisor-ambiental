@@ -55,6 +55,12 @@ for (const l of LAYERS) labelVisible[l.id] = true;
 const wfsData = {};
 for (const l of LAYERS) if (l.wfs) wfsData[l.id] = new Map();
 
+// Capas cuyo archivo .pmtiles no se pudo cargar (falta en data-web/, o el
+// servidor falla): id -> motivo. Ver el manejador de "error" mas abajo.
+// labelsUnavailable: solo falta el de nombres (<id>_labels.pmtiles).
+const layerUnavailable = {};
+const labelsUnavailable = {};
+
 function wfsFeatureCollection(layerId) {
   return { type: "FeatureCollection", features: [...wfsData[layerId].values()] };
 }
@@ -91,6 +97,11 @@ function layerColorExpression(l, channel) {
   return ["match", ["get", l.colorByField], ...stops, l.color[channel]];
 }
 
+// Puntos kilometricos de las infraestructuras: el circulo desde un zoom en el
+// que ya no se amontonan (~1 km = 20 px) y el texto un poco despues.
+const PK_MIN_ZOOM = 11;
+const PK_LABEL_MIN_ZOOM = 12;
+
 function buildStyle(basemapKey) {
   const basemap = BASEMAPS[basemapKey];
   const sources = {
@@ -105,6 +116,9 @@ function buildStyle(basemapKey) {
   const layers = [{ id: "basemap", type: "raster", source: "basemap" }];
 
   for (const l of LAYERS) {
+    // Una capa cuyo archivo ya fallo no se vuelve a pedir (cambio de mapa
+    // base, reordenar capas): volveria a dejar el mapa sin terminar de cargar.
+    if (layerUnavailable[l.id]) continue;
     const sourceId = `src-${l.id}`;
     // Capa en linea: fuente GeoJSON que rellena wfs-layers.js con lo que
     // descarga del servicio (y aqui con lo ya descargado, ver wfsData). Una
@@ -121,7 +135,8 @@ function buildStyle(basemapKey) {
 
       // Fuente de puntos de etiqueta, separada del poligono/linea propios
       // de la capa -- ver comentario junto a la capa "-label" mas abajo.
-      if (l.labelField) {
+      // Las infraestructuras ponen el nombre a lo largo de su propia linea.
+      if (l.labelField && !l.lineLabelField && !labelsUnavailable[l.id]) {
         sources[`${sourceId}-labels`] = {
           type: "vector",
           url: `pmtiles://../data-web/${l.id}_labels.pmtiles`,
@@ -160,11 +175,67 @@ function buildStyle(basemapKey) {
           "line-color": layerColorExpression(l, "line"),
           "line-width": ["interpolate", ["linear"], ["zoom"], 4, 0.6, 12, 2.2],
           "line-opacity": opacity,
+          ...(l.dash ? { "line-dasharray": l.dash } : {}),
         },
       });
     }
 
-    if (l.labelField) {
+    // Infraestructuras (layers.js, INFRA_LAYERS): nombre a lo largo de la
+    // linea y sus puntos kilometricos.
+    if (l.lineLabelField) {
+      layers.push({
+        id: `${l.id}-label`,
+        type: "symbol",
+        source: sourceId,
+        ...sourceLayerProp,
+        minzoom: 9,
+        layout: {
+          visibility: layerVisible[l.id] && labelVisible[l.id] ? "visible" : "none",
+          "text-field": ["coalesce", ["get", l.lineLabelField], ""],
+          "text-font": ["Noto Sans Regular"],
+          "text-size": 11,
+          "symbol-placement": "line",
+          "symbol-spacing": 400,
+        },
+        paint: { "text-color": l.color.line, "text-halo-color": "#ffffff", "text-halo-width": 1.4 },
+      });
+    }
+    if (l.pk) {
+      layers.push({
+        id: `${l.id}-pk`,
+        type: "circle",
+        source: sourceId,
+        "source-layer": l.pk.sourceLayer,
+        minzoom: PK_MIN_ZOOM,
+        layout: { visibility },
+        paint: {
+          "circle-radius": 2.5,
+          "circle-color": l.color.line,
+          "circle-stroke-color": "#ffffff",
+          "circle-stroke-width": 1,
+          "circle-opacity": opacity,
+          "circle-stroke-opacity": opacity,
+        },
+      });
+      layers.push({
+        id: `${l.id}-pk-label`,
+        type: "symbol",
+        source: sourceId,
+        "source-layer": l.pk.sourceLayer,
+        minzoom: PK_LABEL_MIN_ZOOM,
+        layout: {
+          visibility: layerVisible[l.id] && labelVisible[l.id] ? "visible" : "none",
+          "text-field": ["get", l.pk.labelField],
+          "text-font": ["Noto Sans Regular"],
+          "text-size": 10,
+          "text-anchor": "left",
+          "text-offset": [0.6, 0],
+        },
+        paint: { "text-color": l.color.line, "text-halo-color": "#ffffff", "text-halo-width": 1.4 },
+      });
+    }
+
+    if (l.labelField && !l.lineLabelField && !labelsUnavailable[l.id]) {
       layers.push({
         id: `${l.id}-label`,
         type: "symbol",
@@ -250,6 +321,53 @@ map.addControl(
   "bottom-right"
 );
 
+// --- Archivo de capa que no se puede cargar ---
+//
+// Si falta un .pmtiles (o el servidor falla al pedirlo), MapLibre deja esa
+// fuente "pendiente" para siempre en vez de darla por fallida: el evento
+// "load" no llega nunca (y con el, el panel de capas no se construia) y
+// tampoco "idle", del que dependen el analisis y la exportacion (agotaban su
+// tope de 20 s y salian "incompletos" siempre). Reproducido el 2026-10-06
+// quitando iba.pmtiles de data-web/. Arreglo: la fuente que falla se quita
+// del mapa con sus capas, para que el resto termine de cargar, y la capa se
+// marca "Archivo no disponible" en el panel y SIN RESULTADO en el analisis
+// (analysis.js), nunca "sin afecciones". Si solo falla el archivo de nombres
+// (<id>_labels.pmtiles), la capa sigue funcionando sin sus nombres.
+function dropSource(sourceId) {
+  for (const ly of map.getStyle().layers) {
+    if (ly.source === sourceId) map.removeLayer(ly.id);
+  }
+  if (map.getSource(sourceId)) map.removeSource(sourceId);
+}
+
+map.on("error", (e) => {
+  // Un error de una tesela suelta (e.tile) no inutiliza la capa entera.
+  if (!e.sourceId || e.tile) return;
+  const m = /^src-(.+?)(-labels)?$/.exec(e.sourceId);
+  const l = m && LAYERS.find((x) => x.id === m[1]);
+  if (!l || l.wfs) return;
+  const motivo = (e.error && e.error.message) || "error al cargar el archivo";
+  // Fuera del propio evento: quitar fuentes mientras MapLibre lo esta
+  // despachando es arriesgado.
+  setTimeout(() => {
+    if (m[2]) {
+      if (labelsUnavailable[l.id]) return;
+      labelsUnavailable[l.id] = motivo;
+      console.warn(`Nombres de "${l.nombre}" no disponibles (${l.id}_labels.pmtiles): ${motivo}`);
+      dropSource(e.sourceId);
+      if (document.getElementById("all-layers-toggle")) buildLayerPanel();
+      return;
+    }
+    if (layerUnavailable[l.id]) return;
+    layerUnavailable[l.id] = motivo;
+    layerVisible[l.id] = false;
+    console.warn(`Capa "${l.nombre}" no disponible (${l.id}.pmtiles): ${motivo}`);
+    dropSource(e.sourceId);
+    if (map.getSource(`${e.sourceId}-labels`)) dropSource(`${e.sourceId}-labels`);
+    if (document.getElementById("all-layers-toggle")) buildLayerPanel();
+  }, 0);
+});
+
 // --- Cambio de mapa base ---
 document.querySelectorAll('input[name="basemap"]').forEach((el) => {
   el.addEventListener("change", (e) => {
@@ -260,13 +378,22 @@ document.querySelectorAll('input[name="basemap"]').forEach((el) => {
 });
 
 function layerIds(l) {
-  return l.geom === "polygon" ? [`${l.id}-fill`, `${l.id}-line`] : [`${l.id}-line`];
+  if (l.geom === "polygon") return [`${l.id}-fill`, `${l.id}-line`];
+  return l.pk ? [`${l.id}-line`, `${l.id}-pk`] : [`${l.id}-line`];
+}
+
+// Capas de texto de una capa: su nombre y, en infraestructuras, sus PK
+// (el boton "Aa" del panel enciende o apaga los dos).
+function labelLayerIds(l) {
+  return [`${l.id}-label`, ...(l.pk ? [`${l.id}-pk-label`] : [])];
 }
 
 function applyLabelVisibility(l) {
-  if (!l.labelField || !map.getLayer(`${l.id}-label`)) return;
+  if (!l.labelField) return;
   const vis = layerVisible[l.id] && labelVisible[l.id] ? "visible" : "none";
-  map.setLayoutProperty(`${l.id}-label`, "visibility", vis);
+  for (const id of labelLayerIds(l)) {
+    if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", vis);
+  }
 }
 
 function setLayerVisible(l, visible) {
@@ -315,6 +442,10 @@ function setLayerOpacity(l, opacity) {
   }
   if (map.getLayer(`${l.id}-line`)) {
     map.setPaintProperty(`${l.id}-line`, "line-opacity", opacity);
+  }
+  if (l.pk && map.getLayer(`${l.id}-pk`)) {
+    map.setPaintProperty(`${l.id}-pk`, "circle-opacity", opacity);
+    map.setPaintProperty(`${l.id}-pk`, "circle-stroke-opacity", opacity);
   }
   // El nombre del elemento (text-opacity) es independiente de esto a
   // proposito -- ver el comentario junto a "text-opacity" en buildStyle.
@@ -376,6 +507,13 @@ function buildLayerPanel() {
     html += `<div class="tematica-group"><h3><label class="tematica-toggle-label" title="Encender o apagar todas las capas de este grupo">
       <input type="checkbox" class="tematica-toggle" data-tematica="${tematica}"> ${TEMATICA_LABEL[tematica]}</label></h3>`;
     capas.forEach((l, i) => {
+      // Archivo que no se pudo cargar (ver el manejador de "error"): la fila
+      // se queda, para que se sepa que la capa existe y por que no se ve.
+      const unavailable = layerUnavailable[l.id];
+      const off = unavailable ? "disabled" : "";
+      const status = unavailable
+        ? `<span class="layer-live-status layer-live-error" title="${String(unavailable).replace(/"/g, "&quot;")}">Archivo no disponible</span>`
+        : l.wfs && typeof wfsStatusHtml === "function" ? wfsStatusHtml(l.id) : "";
       const checked = layerVisible[l.id] ? "checked" : "";
       const opacityPct = Math.round(layerOpacity[l.id] * 100);
       const disabledUp = i === 0 ? "disabled" : "";
@@ -385,18 +523,18 @@ function buildLayerPanel() {
       // linea con los botones, el nombre solo tenia ~110 px y se cortaba o
       // partia en 3-4 lineas.
       html += `
-        <div class="layer-row">
+        <div class="layer-row${unavailable ? " layer-row-unavailable" : ""}">
           <label class="layer-row-title">
-            <input type="checkbox" class="layer-toggle" data-id="${l.id}" ${checked}>
+            <input type="checkbox" class="layer-toggle" data-id="${l.id}" ${checked} ${off}>
             ${swatchHtml(l)}
             <span class="nivel-badge nivel-badge-${l.nivel}" title="${NIVEL_LABEL[l.nivel]}">${NIVEL_BADGE[l.nivel]}</span>
-            <span class="layer-name" title="${l.nombre} · ${l.fuente}">${l.nombre}${l.wfs && typeof wfsStatusHtml === "function" ? wfsStatusHtml(l.id) : ""}</span>
+            <span class="layer-name" title="${l.nombre} · ${l.fuente}">${l.nombre}${status}</span>
           </label>
           <div class="layer-row-controls">
-            <input type="range" class="layer-opacity" data-id="${l.id}" min="0" max="100" value="${opacityPct}" title="Transparencia">
+            <input type="range" class="layer-opacity" data-id="${l.id}" min="0" max="100" value="${opacityPct}" title="Transparencia" ${off}>
             <span class="layer-order-btns">
-              ${l.labelField ? `<label class="label-toggle-btn" title="Mostrar/ocultar nombres">
-                <input type="checkbox" class="layer-label-toggle" data-id="${l.id}" ${labelVisible[l.id] ? "checked" : ""}>Aa
+              ${l.labelField ? `<label class="label-toggle-btn" title="${labelsUnavailable[l.id] ? "Nombres no disponibles (no se pudo cargar su archivo)" : "Mostrar/ocultar nombres"}">
+                <input type="checkbox" class="layer-label-toggle" data-id="${l.id}" ${labelVisible[l.id] && !labelsUnavailable[l.id] ? "checked" : ""} ${unavailable || labelsUnavailable[l.id] ? "disabled" : ""}>Aa
               </label>` : ""}
               <button class="layer-order-btn" data-id="${l.id}" data-dir="up" ${disabledUp} title="Dibujar más encima">▲</button>
               <button class="layer-order-btn" data-id="${l.id}" data-dir="down" ${disabledDown} title="Dibujar más debajo">▼</button>
@@ -411,28 +549,30 @@ function buildLayerPanel() {
   // Estado de las casillas de grupo y de "Todas": marcada si todas sus capas
   // estan encendidas, con guion si solo algunas. Las casillas de capa se
   // ajustan tambien (la exportacion lee su estado, ver export.js).
+  // Las casillas de grupo y "Todas" solo cuentan las capas disponibles.
+  const available = LAYERS.filter((l) => !layerUnavailable[l.id]);
   const syncGroupToggles = () => {
     panel.querySelectorAll(".layer-toggle").forEach((cb) => {
       cb.checked = !!layerVisible[cb.dataset.id];
     });
     const setState = (cb, layers) => {
       const on = layers.filter((l) => layerVisible[l.id]).length;
-      cb.checked = on === layers.length;
+      cb.checked = layers.length > 0 && on === layers.length;
       cb.indeterminate = on > 0 && on < layers.length;
     };
     panel.querySelectorAll(".tematica-toggle").forEach((cb) => {
-      setState(cb, LAYERS.filter((l) => l.tematica === cb.dataset.tematica));
+      setState(cb, available.filter((l) => l.tematica === cb.dataset.tematica));
     });
-    setState(panel.querySelector("#all-layers-toggle"), LAYERS);
+    setState(panel.querySelector("#all-layers-toggle"), available);
   };
   const setMany = (layers, visible) => {
     for (const l of layers) if (!!layerVisible[l.id] !== visible) setLayerVisible(l, visible);
     syncGroupToggles();
   };
 
-  panel.querySelector("#all-layers-toggle").addEventListener("change", (e) => setMany(LAYERS, e.target.checked));
+  panel.querySelector("#all-layers-toggle").addEventListener("change", (e) => setMany(available, e.target.checked));
   panel.querySelectorAll(".tematica-toggle").forEach((cb) => {
-    cb.addEventListener("change", () => setMany(LAYERS.filter((l) => l.tematica === cb.dataset.tematica), cb.checked));
+    cb.addEventListener("change", () => setMany(available.filter((l) => l.tematica === cb.dataset.tematica), cb.checked));
   });
   panel.querySelectorAll(".layer-toggle").forEach((cb) => {
     cb.addEventListener("change", () => {

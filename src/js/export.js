@@ -405,17 +405,30 @@ async function captureMapAtScale(targetScaleN, mapW, mapH, options = {}) {
   // (la referencia de pantalla que ya usa SCREEN_MM_PER_CSS_PX) y
   // escalandolos para que el texto ocupe el mismo tamano FISICO en el
   // papel sea cual sea EXPORT_DPI o el devicePixelRatio del navegador.
+  // Todas las capas de texto del estilo (nombres y, desde 2026-10-05, los PK
+  // de las infraestructuras), no una lista de ids a mano: asi una capa de
+  // texto nueva no sale diminuta en el papel por olvidarla aqui. Mismo
+  // criterio para los circulos de los PK (radio y borde).
   const restoreTextSizes = [];
-  for (const l of LAYERS) {
-    if (!l.labelField) continue;
-    const id = `${l.id}-label`;
-    if (!map.getLayer(id)) continue;
-    const original = map.getLayoutProperty(id, "text-size");
-    restoreTextSizes.push([id, original]);
-    const onScreenPx = typeof original === "number" ? original : ON_SCREEN_LABEL_TEXT_SIZE;
-    const onScreenMm = onScreenPx * SCREEN_MM_PER_CSS_PX;
-    const exportPx = (onScreenMm / MM_PER_IN) * EXPORT_DPI / dpr;
-    map.setLayoutProperty(id, "text-size", exportPx);
+  const restoreCircles = [];
+  for (const layerDef of map.getStyle().layers) {
+    const id = layerDef.id;
+    if (layerDef.type === "symbol") {
+      const original = map.getLayoutProperty(id, "text-size");
+      if (original == null) continue;
+      restoreTextSizes.push([id, original]);
+      const onScreenPx = typeof original === "number" ? original : ON_SCREEN_LABEL_TEXT_SIZE;
+      const onScreenMm = onScreenPx * SCREEN_MM_PER_CSS_PX;
+      const exportPx = (onScreenMm / MM_PER_IN) * EXPORT_DPI / dpr;
+      map.setLayoutProperty(id, "text-size", exportPx);
+    } else if (layerDef.type === "circle") {
+      const radius = map.getPaintProperty(id, "circle-radius");
+      const stroke = map.getPaintProperty(id, "circle-stroke-width");
+      restoreCircles.push([id, radius, stroke]);
+      const f = dpiScaleFactor(dpr);
+      if (radius != null) map.setPaintProperty(id, "circle-radius", scaleLineWidthExpr(radius, f));
+      if (stroke != null) map.setPaintProperty(id, "circle-stroke-width", scaleLineWidthExpr(stroke, f));
+    }
   }
 
   // Mismo criterio que el texto, aplicado al grosor de linea de TODAS las
@@ -573,6 +586,10 @@ async function captureMapAtScale(targetScaleN, mapW, mapH, options = {}) {
 
   for (const [id, original] of restoreTextSizes) {
     map.setLayoutProperty(id, "text-size", original);
+  }
+  for (const [id, radius, stroke] of restoreCircles) {
+    if (radius != null) map.setPaintProperty(id, "circle-radius", radius);
+    if (stroke != null) map.setPaintProperty(id, "circle-stroke-width", stroke);
   }
   for (const [id, original] of restoreLineWidths) {
     map.setPaintProperty(id, "line-width", original);
@@ -1249,13 +1266,15 @@ function buildReportPdf() {
 
   // Solo las columnas de REPORT_COLUMNS (analysis.js): las 16 del Excel no
   // caben en A4 apaisado.
-  const rows = resultsToRows(u, results);
+  const header = resultsHeader(analysisMeta);
+  const rows = resultsToRows(u, results, analysisMeta);
   // La fuente va debajo del nombre de la capa (no hay sitio para su propia
   // columna), para que el informe siga siendo citable.
-  const CAPA_IDX = RESULTS_HEADER.indexOf("Capa");
-  const FUENTE_IDX = RESULTS_HEADER.indexOf("Fuente");
+  const CAPA_IDX = header.indexOf("Capa");
+  const FUENTE_IDX = header.indexOf("Fuente");
+  const colIdx = REPORT_COLUMNS.map(([name]) => header.indexOf(name));
   const body = rows.map((row) =>
-    REPORT_COLUMNS.map(([idx]) => {
+    colIdx.map((idx) => {
       const v = row[idx];
       if (idx === CAPA_IDX && row[FUENTE_IDX]) return `${v}\n(${row[FUENTE_IDX]})`;
       if (v === "" || v == null) return "-";
@@ -1274,6 +1293,52 @@ function buildReportPdf() {
     pdf.text(`Página ${pdf.internal.getNumberOfPages()}`, w - marginX, pageH - 8, { align: "right" });
   };
 
+  // Semaforo coloreado en la primera columna (tabla por capa y por tramo).
+  const colorSensitivityCell = (data) => {
+    if (data.section !== "body" || data.column.index !== 0) return;
+    const color = SENSITIVITY_COLOR[data.cell.raw];
+    if (!color) return;
+    data.cell.styles.fillColor = hexToRgb(color);
+    data.cell.styles.textColor = 255;
+    data.cell.styles.fontStyle = "bold";
+  };
+  const sectionTitle = (text, y) => {
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(10.5);
+    pdf.setTextColor(...REPORT_BLUE);
+    pdf.text(text, marginX, y);
+  };
+
+  // Con varios tramos, primero el resumen por tramo (lo que se busca en una
+  // oferta de muchos tramos) y despues la tabla por capa.
+  if (isMultiTramo(analysisMeta)) {
+    sectionTitle("Resumen por tramo", tableStartY + 2);
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(8);
+    pdf.setTextColor(70, 70, 70);
+    const noteLines = pdf.splitTextToSize(tramoSummaryNote(analysisMeta), pageW - marginX * 2);
+    pdf.text(noteLines, marginX, tableStartY + 7);
+    pdf.autoTable({
+      head: [TRAMO_SUMMARY_HEADER],
+      body: tramoSummaryRows(analysisMeta),
+      startY: tableStartY + 9 + noteLines.length * 3.4,
+      margin: { left: marginX, right: marginX, bottom: 16 },
+      styles: { fontSize: 7, cellPadding: 1.4, valign: "middle", lineColor: [220, 220, 220], lineWidth: 0.1 },
+      headStyles: { fillColor: REPORT_BLUE, textColor: 255, fontStyle: "bold" },
+      alternateRowStyles: { fillColor: REPORT_BAND },
+      columnStyles: { 0: { cellWidth: 20, halign: "center" }, 1: { cellWidth: 52 }, 2: { cellWidth: 22 }, 3: { cellWidth: 40 }, 4: { cellWidth: 139 } },
+      didParseCell: colorSensitivityCell,
+      didDrawPage: drawFooter,
+    });
+    tableStartY = pdf.lastAutoTable.finalY + 10;
+    if (tableStartY > pdf.internal.pageSize.getHeight() - 40) {
+      pdf.addPage([297, 210], "landscape");
+      tableStartY = 18;
+    }
+    sectionTitle("Afecciones por capa", tableStartY);
+    tableStartY += 3;
+  }
+
   if (body.length === 0) {
     pdf.setFontSize(10);
     pdf.setTextColor(70, 70, 70);
@@ -1281,7 +1346,7 @@ function buildReportPdf() {
     drawFooter();
   } else {
     pdf.autoTable({
-      head: [REPORT_COLUMNS.map(([idx]) => RESULTS_HEADER[idx])],
+      head: [REPORT_COLUMNS.map(([name]) => name)],
       body,
       startY: tableStartY,
       margin: { left: marginX, right: marginX, bottom: 16 },
@@ -1291,14 +1356,7 @@ function buildReportPdf() {
       columnStyles: Object.fromEntries(
         REPORT_COLUMNS.map(([, w], i) => [i, i === 0 ? { cellWidth: w, halign: "center" } : { cellWidth: w }])
       ),
-      didParseCell: (data) => {
-        if (data.section !== "body" || data.column.index !== 0) return;
-        const color = SENSITIVITY_COLOR[data.cell.raw];
-        if (!color) return;
-        data.cell.styles.fillColor = hexToRgb(color);
-        data.cell.styles.textColor = 255;
-        data.cell.styles.fontStyle = "bold";
-      },
+      didParseCell: colorSensitivityCell,
       didDrawPage: drawFooter,
     });
   }

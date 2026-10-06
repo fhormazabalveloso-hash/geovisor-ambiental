@@ -18,6 +18,132 @@ html, body {
   height: 100vh;
 }
 
+/* --- Portada de entrada (js/portada.js) ---
+   Azul Quadrante semitransparente: el mapa carga detras y se intuye
+   difuminado mientras tanto. */
+#portada {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  color: #fff;
+  background: linear-gradient(160deg, rgba(24, 44, 84, 0.95) 0%, rgba(24, 44, 84, 0.88) 55%, rgba(12, 24, 48, 0.96) 100%);
+  backdrop-filter: blur(6px);
+  transition: opacity 0.35s ease;
+}
+
+#portada[hidden] {
+  display: none;
+}
+
+#portada.portada-saliendo {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.portada-contenido {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-width: 560px;
+  text-align: center;
+}
+
+.portada-logo {
+  height: 64px;
+  max-width: 100%;
+}
+
+.portada-unidad {
+  margin-top: 16px;
+  padding: 3px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+.portada-separador {
+  width: 48px;
+  height: 2px;
+  margin-top: 36px;
+  background: rgba(255, 255, 255, 0.5);
+}
+
+#portada h1 {
+  margin: 24px 0 10px;
+  font-size: 44px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.portada-lema {
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.4;
+  opacity: 0.85;
+}
+
+#portada-entrar {
+  margin-top: 36px;
+  padding: 12px 34px;
+  border: none;
+  border-radius: 6px;
+  background: #fff;
+  color: var(--quadrante-blue);
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+#portada-entrar:hover {
+  background: #e3e9f3;
+}
+
+#portada-entrar:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 3px;
+}
+
+.portada-nota {
+  margin: 18px 0 0;
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.portada-pie {
+  position: absolute;
+  right: 0;
+  bottom: 18px;
+  left: 0;
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-align: center;
+  opacity: 0.6;
+}
+
+@media (max-width: 600px) {
+  .portada-logo {
+    height: 48px;
+  }
+
+  #portada h1 {
+    font-size: 32px;
+  }
+
+  .portada-lema {
+    font-size: 15px;
+  }
+}
+
 #map-container {
   position: relative;
   flex: 1;
@@ -281,6 +407,12 @@ html, body {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
 }
 
+/* Con varios tramos hay una columna mas ("Tramos") y la tabla de resumen
+   por tramo: a 620 px la tabla por capa desbordaba el modal. */
+#analysis-modal.analysis-modal-wide {
+  width: 920px;
+}
+
 #analysis-modal h2 {
   margin: 0 0 8px;
   font-size: 16px;
@@ -534,6 +666,14 @@ html, body {
 .layer-live-status.layer-live-error {
   color: #B71C1C;
   font-weight: 600;
+}
+
+/* Capa cuyo archivo no se pudo cargar (main.js): atenuada, con el aviso
+   en rojo a la vista. */
+.layer-row-unavailable .swatch,
+.layer-row-unavailable .nivel-badge,
+.layer-row-unavailable .layer-row-controls {
+  opacity: 0.4;
 }
 
 #layer-panel .layer-row-controls {
@@ -915,6 +1055,36 @@ html, body {
 
 .analysis-limits .analysis-coverage-note {
   margin: 6px 0 0;
+}
+
+/* Resumen por tramo (rama avanzado) */
+.analysis-tramo-hit {
+  margin: 2px 0;
+  line-height: 1.5;
+}
+
+.analysis-tramo-hit .sensitivity-badge {
+  font-size: 10px;
+  padding: 1px 5px;
+}
+
+/* Los nombres de tramo suelen ser una sola "palabra" larga
+   (linea_PKinicio_PKfin_margen): se dejan partir para que la tabla no
+   desborde el modal. */
+.analysis-tramos-cell,
+.analysis-tramos-table td:nth-child(2),
+.analysis-tramos-table td:nth-child(4) {
+  overflow-wrap: anywhere;
+}
+
+/* Un nombre de tramo por linea en la tabla por capa. */
+.analysis-tramos-cell {
+  min-width: 170px;
+}
+
+/* Lo que hay en el buffer de cada tramo es lo que se lee: mas ancho. */
+.analysis-tramos-table td:nth-child(5) {
+  min-width: 260px;
 }
 
 .analysis-method summary {

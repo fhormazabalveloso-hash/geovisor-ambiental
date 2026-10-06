@@ -162,6 +162,49 @@ const FLOOD_LAYERS = [
   },
 ];
 
+// Infraestructuras (rama avanzado, 2026-10-05): red ferroviaria y carreteras
+// del Estado con sus PK, de la Red de Transporte del IGN (ver
+// pipeline/build_infraestructuras.py). Nivel 3: son contexto, no afecciones
+// ambientales, asi que el analisis no las cruza (ANALYSIS_NIVELES en
+// analysis.js). Al final del array: se dibujan por encima de todo, como en un
+// plano de proyecto.
+// pk: puntos kilometricos, en el mismo .pmtiles (source-layer "pk"), con
+//   circulo desde PK_MIN_ZOOM y etiqueta ("L100 PK 17+500") desde
+//   PK_LABEL_MIN_ZOOM (main.js). El nombre de la linea va A LO LARGO de la
+//   propia linea (lineLabelField), no en un punto aparte como el resto.
+// dash: trazo discontinuo (el ferrocarril, para distinguirlo de la carretera).
+const INFRA_LAYERS = [
+  {
+    id: "ffcc",
+    nombre: "Red ferroviaria",
+    fuente: "IGN - Red de Transporte (PK de ADIF)",
+    tematica: "infraestructuras",
+    nivel: 3,
+    sourceLayer: "lineas",
+    geom: "line",
+    color: { fill: "#546E7A", line: "#263238" }, // gris pizarra
+    labelField: "nombre",
+    lineLabelField: "nombre",
+    dash: [3, 1.5],
+    pk: { sourceLayer: "pk", labelField: "etiqueta" },
+    visibleByDefault: false,
+  },
+  {
+    id: "carreteras_estado",
+    nombre: "Carreteras del Estado",
+    fuente: "IGN - Red de Transporte (PK de la DGC y la DGT)",
+    tematica: "infraestructuras",
+    nivel: 3,
+    sourceLayer: "lineas",
+    geom: "line",
+    color: { fill: "#E57373", line: "#B71C1C" }, // rojo oscuro, como en los mapas de carreteras
+    labelField: "nombre",
+    lineLabelField: "nombre",
+    pk: { sourceLayer: "pk", labelField: "etiqueta" },
+    visibleByDefault: false,
+  },
+];
+
 const LAYERS = [
   ...FLOOD_LAYERS,
   {
@@ -338,6 +381,7 @@ const LAYERS = [
   // provincia (data-web/situacion_provincias.geojson, generado por
   // pipeline/build_situacion.py) -- ver captureInset en export.js. Los
   // limites_*.pmtiles siguen en data-web/ por si se retoman.
+  ...(FEATURES.infraestructuras ? INFRA_LAYERS : []),
 ];
 
 // Semaforo de sensibilidad (ver nota junto a "importancia" mas arriba) --
@@ -371,7 +415,7 @@ const NIVEL_BADGE = {
 // agrupa por tematica de cara al usuario, con el nivel juridico como
 // metadato). "contexto" va el ultimo a proposito -- ver nota junto a
 // LAYERS sobre orden de dibujo.
-const TEMATICA_ORDER = ["espacios_protegidos", "hidrografia", "inundabilidad", "patrimonio_natural", "contexto"];
+const TEMATICA_ORDER = ["espacios_protegidos", "hidrografia", "inundabilidad", "patrimonio_natural", "contexto", "infraestructuras"];
 
 const TEMATICA_LABEL = {
   espacios_protegidos: "Espacios protegidos",
@@ -379,4 +423,5 @@ const TEMATICA_LABEL = {
   inundabilidad: "Zonas inundables (en línea)",
   patrimonio_natural: "Patrimonio natural",
   contexto: "Contexto",
+  infraestructuras: "Infraestructuras",
 };

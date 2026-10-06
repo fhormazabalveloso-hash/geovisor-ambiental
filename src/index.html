@@ -9,6 +9,24 @@
   <link href="css/style.css" rel="stylesheet" />
 </head>
 <body>
+  <!-- Portada de entrada (2026-10-06, pedido por Francisco): solo presentacion,
+       sin usuario ni contrasena. Ver js/portada.js. -->
+  <div id="portada" role="dialog" aria-modal="true" aria-labelledby="portada-titulo">
+    <div class="portada-contenido">
+      <img class="portada-logo" src="assets/QDE_META_White.svg" alt="Quadrante · Meta Engineering">
+      <span class="portada-unidad">CMS Sur</span>
+      <span class="portada-separador"></span>
+      <h1 id="portada-titulo">Geovisor Ambiental</h1>
+      <p class="portada-lema">Análisis preliminar de condicionantes ambientales para ofertas de obra</p>
+      <button id="portada-entrar" type="button">Entrar al visor</button>
+      <p class="portada-nota"><span class="version-nombre">Versión piloto</span> · No sustituye a la cartografía QGIS final</p>
+    </div>
+    <p class="portada-pie">Datos oficiales de MITECO, IGN y SNCZI</p>
+  </div>
+  <!-- config.js antes que la portada: la portada y el pie dicen que version es. -->
+  <script src="js/config.js"></script>
+  <script src="js/portada.js"></script>
+
   <div id="app">
     <div id="map-container">
       <div id="map"></div>
@@ -119,7 +137,7 @@
 
     <div id="analysis-overlay" hidden>
       <div class="spinner"></div>
-      <span>Analizando afecciones…</span>
+      <span id="analysis-overlay-text">Analizando afecciones…</span>
     </div>
 
     <div id="analysis-modal-backdrop" hidden>
@@ -170,7 +188,7 @@
       <div class="logo"><img src="assets/QDE_META_White.svg" alt="Quadrante" /></div>
       <div class="titulo">
         <strong>Geovisor Ambiental</strong>
-        <span>Versión piloto - no sustituye a la cartografía QGIS final</span>
+        <span><span class="version-nombre">Versión piloto</span> - no sustituye a la cartografía QGIS final</span>
       </div>
       <div class="fuente">
         Elaboración propia a partir de MITECO / IGN · ETRS89 / EPSG:4326 (visor) · EPSG:25830 (QGIS)
@@ -188,11 +206,11 @@
   <script src="https://unpkg.com/jszip@3/dist/jszip.min.js"></script>
   <script src="https://unpkg.com/exceljs@4/dist/exceljs.min.js"></script>
   <script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
-  <script src="js/config.js"></script>
   <script src="js/layers.js"></script>
   <script src="js/main.js"></script>
   <script src="js/wfs-layers.js"></script>
   <script src="js/export.js"></script>
+  <script src="js/tramos.js"></script>
   <script src="js/upload.js"></script>
   <script src="js/analysis.js"></script>
   <script src="js/ai-prompt.js"></script>

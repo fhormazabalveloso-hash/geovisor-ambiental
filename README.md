@@ -748,7 +748,113 @@ Este documento se centra en el **Componente 1**.
   - **Pendiente, detectado con este caso:** el resultado agrupa los 16 tramos
     y no dice cuál toca qué. Además, con tramos tan dispersos el análisis
     trabaja a zoom 8,8 (más simplificación en las capas locales; probado
-    solo hasta ~60 km). Propuesta: análisis **por tramo**.
+    solo hasta ~60 km). Propuesta: análisis **por tramo** (hecho el
+    2026-10-02 en la rama `avanzado`, ver abajo).
+
+- **2026-10-02 - Rama `avanzado` (local, no se publica).** `main` queda
+  congelada en la versión piloto publicada; el trabajo para el concurso sigue
+  en la rama `avanzado`, que abre en modo completo por defecto
+  (`?modo=basico` para ensayar el piloto). Así lo nuevo no llega al código
+  público aunque se suba un arreglo del piloto.
+
+- **2026-10-02 - Análisis por tramo** (`src/js/tramos.js`, rama `avanzado`,
+  `FEATURES.porTramo`).
+  - Cada línea o polígono del archivo es un **tramo** con su nombre (las
+    márgenes MD/MI son tramos distintos). Un punto a menos de 200 m de un
+    tramo es una **marca** (su PK, un hito): se asocia al tramo más cercano
+    (a los dos si están casi igual de cerca, como las dos márgenes de un
+    mismo PK) y **no se analiza como obra**. Antes, en la oferta de 16
+    tramos, un punto de PK dentro de la zona inundable T500 salía como "el
+    punto de la obra cae dentro". Un punto lejos de los tramos, o un archivo
+    solo de puntos, sigue siendo obra.
+  - **Cada zona se analiza a su propio zoom.** Los tramos se agrupan en
+    vistas que quepan a zoom ≥ 11 (geometría a ~4 m) y cada vista se dibuja
+    y se consulta por separado; en la oferta de 16 tramos, 4 zonas a zoom
+    11-13 en vez de una sola a 8,8. Los tramos cuyos buffers se tocan van
+    siempre juntos, así que los buffers de vistas distintas no se solapan y
+    hectáreas y metros se suman sin contar nada dos veces. Las medidas del
+    contacto directo se suman antes de redactar el texto
+    (`directContactMeasures` / `contactFromMeasures`).
+  - **Resultados:** tabla "Resumen por tramo" (sensibilidad máxima, longitud,
+    puntos asociados y qué hay en su buffer y cómo lo toca), columna
+    "Tramos" en las tablas por capa, y el tramo más cercano a cada elemento
+    próximo. También en el Excel (columna y hoja "Tramos"), el CSV, el
+    informe PDF (resumen por tramo antes de la tabla por capa) y el texto
+    para la IA.
+  - **Comprobado:** con un solo tramo el resultado es idéntico al anterior
+    (Manzanares, Carboneras, Córdoba 58 km y Los Álamos, comparados capa a
+    capa), y en modo básico la oferta da lo mismo que el piloto. En la oferta
+    de 16 tramos, las sumas por tramo cuadran con el total (p. ej. vías
+    pecuarias: 7 cruces = 1 + 2 + 1 + 1 + 1 + 1 en sus tramos). Cambios
+    respecto al análisis en una sola vista, todos esperables: desaparece el
+    falso "punto dentro"; las vías pecuarias bajan de 21,2 a 19,1 km y de 26
+    a 23 elementos (a zoom 8 el margen de solape entre teselas, del orden de
+    2 km sobre el terreno, contaba dos veces tramos de camino); las zonas en
+    línea pierden ~0,1 % de superficie (los puntos de PK ya no generan
+    buffer propio).
+  - Coste: varias vistas tardan más (27 s frente a 10 s en la oferta, en el
+    entorno de pruebas); el aviso de progreso dice "zona 2 de 4".
+
+- **2026-10-05 - Red ferroviaria y carreteras del Estado con sus PK** (rama
+  `avanzado`, `FEATURES.infraestructuras`, grupo "Infraestructuras" del panel).
+  - Origen: Red de Transporte del IGN (carpeta `17-ferrocarriles-espana`).
+    Ferrocarril: solo tipo "Tren" (sin metro, tranvía ni funicular), 29.378 PK
+    (casi todos de ADIF). Carreteras: titularidad del Estado y tipo
+    "Carretera", 57.684 PK (venían repetidos por sentido en las autovías: uno
+    por carretera y km). Script propio: `pipeline/build_infraestructuras.py`.
+  - En el mapa: la línea (el ferrocarril, discontinuo), su nombre a lo largo
+    de la línea desde zoom 9, los PK como puntos desde zoom 11 y su etiqueta
+    ("L100 PK 17", "A-4 PK 23+500") desde zoom 12. El botón "Aa" del panel
+    enciende o apaga nombres y PK a la vez.
+  - Nivel 3 (contexto): no entran en el semáforo ni en el análisis.
+  - Comprobado contra los PK de un trazado real: junto a cada PK de
+    referencia hay un PK de ADIF a ~100 m, en la línea correcta.
+  - Exportación: el tamaño de TODOS los textos y puntos del mapa se ajusta a
+    la resolución de impresión (antes, solo los nombres de una lista de
+    capas), así que los PK salen a su tamaño en el A3. Efecto añadido: los
+    puntos de un archivo subido (obra puntual) ya no salen a la mitad de
+    tamaño en el papel.
+
+- **2026-10-06 - Un archivo de capa que falta ya no deja el visor sin panel.**
+  Reproducido quitando `iba.pmtiles` de `data-web/`: MapLibre deja esa fuente
+  "pendiente" para siempre en vez de darla por fallida, así que nunca llegaba
+  el evento `load` (el panel de capas no se construía) ni `idle` (el análisis
+  y la exportación agotaban su tope de 20 s y salían "incompletos" siempre).
+  Arreglo (`main.js`, manejador de `error`): la fuente que falla se quita del
+  mapa con sus capas y el resto termina de cargar; la fila del panel queda
+  atenuada con "Archivo no disponible" y sin casilla; "Todas las capas" y
+  las casillas de grupo la ignoran; en el análisis sale **SIN RESULTADO**
+  (nunca "sin afecciones"), igual que una capa en línea cuyo servicio no
+  responde. Si solo falta el archivo de nombres (`<id>_labels.pmtiles`), la
+  capa funciona sin nombres y su botón "Aa" queda desactivado. El aviso de
+  capas sin resultado pasa a ser común ("No se pudieron consultar estas
+  capas: ...", con el motivo de cada una). Comprobado quitando a propósito
+  IBA, vías pecuarias y los nombres de Red Natura; con todos los archivos, el
+  resultado de Manzanares es idéntico al de antes.
+  - Visto en la misma prueba: el servidor de mapas de MITECO
+    (`gis.miteco.gob.es`) no responde desde este equipo (la web de MITECO y la
+    ortofoto sí). Las zonas inundables salieron como SIN RESULTADO, con el
+    aviso, como está previsto. Externo: volver a comprobar.
+
+- **2026-10-06 - Portada y publicación de las dos versiones** (decisión de
+  Francisco, con permiso de su superior).
+  - **Portada de entrada** (`js/portada.js`): logo de Quadrante · Meta
+    Engineering, "CMS Sur", título, "Análisis preliminar de condicionantes
+    ambientales para ofertas de obra" y botón "Entrar al visor", sobre el
+    mapa difuminado en azul Quadrante. Sale una vez por pestaña. La portada y
+    el pie del mapa dicen "Versión piloto" o "Versión avanzada" según el
+    modo. Solo presentación: sin usuario ni contraseña, que en GitHub Pages
+    no protegerían nada (el código y los datos son públicos); un acceso de
+    verdad necesita un servidor que lo compruebe y queda como idea aparte.
+  - **Un solo código, dos enlaces.** Se publica la rama `avanzado` (que deja
+    de ser solo local) como `main`. En el sitio publicado abre el modo
+    básico, así que el enlace del piloto (`src/index.html`) sigue mostrando
+    lo mismo que tenía la dirección; la versión avanzada tiene su propio
+    enlace, `avanzado/` (redirige a `src/index.html?modo=completo`). En
+    local abre el modo completo (`config.js`). Antes de subir se quitaron
+    del código y del README las referencias a la oferta real y se juntaron
+    en un solo commit los cambios desde la versión piloto, para que no
+    quedaran en el historial público.
 
 ---
 

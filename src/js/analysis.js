@@ -71,7 +71,7 @@ const ANALYSIS_FLOOD_COVERAGE_NOTE =
 function serviceErrorsText(meta) {
   if (!meta || !meta.serviceErrors || meta.serviceErrors.length === 0) return "";
   const capas = meta.serviceErrors.map((e) => `${e.nombre} (${e.error})`).join("; ");
-  return `No se pudo consultar el servicio en línea de MITECO para: ${capas}. Esas capas quedan SIN RESULTADO, lo que no significa que no haya afección. Repite el análisis más tarde.`;
+  return `No se pudieron consultar estas capas: ${capas}. Quedan SIN RESULTADO, lo que no significa que no haya afección. Repite el análisis más tarde.`;
 }
 
 // Estados posibles de la verificacion en campo de un hallazgo (idea #6 de
@@ -377,6 +377,12 @@ function pointSegmentDist2(px, py, ax, ay, bx, by) {
 // daba antes MultiLineString, que turf.pointToLineDistance no acepta, y el
 // error abortaba el analisis entero (misma carretera de prueba).
 function minDistanceMetersToFeature(ctx, feature, limitM = Infinity) {
+  return minDistanceInfo(ctx, feature, limitM).distanceM;
+}
+
+// Igual, pero dice ademas desde que punto muestreado del trazado (indice en
+// ctx.xy), para saber a que tramo queda mas cerca (ctx.tramoOf).
+function minDistanceInfo(ctx, feature, limitM = Infinity) {
   const paths = [];
   const points = [];
   for (const part of turf.flatten(feature).features) {
@@ -386,7 +392,7 @@ function minDistanceMetersToFeature(ctx, feature, limitM = Infinity) {
     else if (g.type === "LineString") paths.push(g.coordinates.map(ctx.project));
     else if (g.type === "Polygon") for (const ring of g.coordinates) paths.push(ring.map(ctx.project));
   }
-  if (paths.length === 0 && points.length === 0) return Infinity;
+  if (paths.length === 0 && points.length === 0) return { distanceM: Infinity, sampleIdx: -1 };
 
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   const extend = ([x, y]) => {
@@ -399,30 +405,31 @@ function minDistanceMetersToFeature(ctx, feature, limitM = Infinity) {
   paths.forEach((path) => path.forEach(extend));
 
   const candidates = [];
-  for (const [x, y] of ctx.xy) {
+  ctx.xy.forEach(([x, y], k) => {
     const dx = Math.max(minX - x, 0, x - maxX);
     const dy = Math.max(minY - y, 0, y - maxY);
     const bound = Math.hypot(dx, dy);
-    if (bound <= limitM) candidates.push([bound, x, y]);
-  }
+    if (bound <= limitM) candidates.push([bound, x, y, k]);
+  });
   candidates.sort((a, b) => a[0] - b[0]);
 
   let best2 = Infinity;
-  for (const [bound, x, y] of candidates) {
+  let bestIdx = -1;
+  for (const [bound, x, y, k] of candidates) {
     if (bound * bound >= best2) break;
     for (const [qx, qy] of points) {
       const d2 = (qx - x) ** 2 + (qy - y) ** 2;
-      if (d2 < best2) best2 = d2;
+      if (d2 < best2) { best2 = d2; bestIdx = k; }
     }
     for (const path of paths) {
       for (let i = 1; i < path.length; i++) {
         const d2 = pointSegmentDist2(x, y, path[i - 1][0], path[i - 1][1], path[i][0], path[i][1]);
-        if (d2 < best2) best2 = d2;
+        if (d2 < best2) { best2 = d2; bestIdx = k; }
       }
     }
   }
   const best = Math.sqrt(best2);
-  return best <= limitM ? best : Infinity;
+  return best <= limitM ? { distanceM: best, sampleIdx: bestIdx } : { distanceM: Infinity, sampleIdx: -1 };
 }
 
 // --- Semaforo de sensibilidad (rediseno del 2026-09-29) ---
@@ -527,56 +534,86 @@ function trazadoParts(geojson) {
 // - capa de lineas: veces que la obra cruza el elemento, o metros del
 //   elemento dentro de la huella.
 function directContactForLayer(l, entities, traz, ctx) {
+  return contactFromMeasures(directContactMeasures(l, entities, traz, ctx));
+}
+
+// Las medidas del contacto, sin redactar: con el analisis por tramo se miden
+// por separado en cada vista (ver planAnalysisViews) y se suman antes de
+// escribir el texto (mergeContactMeasures).
+function directContactMeasures(l, entities, traz, ctx) {
   const touching = entities.filter((e) => traz.touches(e.feature));
   if (touching.length === 0) return null;
-  const names = [...new Set(touching.map((e) => e.name).filter(Boolean))].sort();
-  const parts = [];
-  let isDirect = false;
-
-  if (l.geom === "polygon") {
+  const m = {
+    polygonLayer: l.geom === "polygon",
+    names: new Set(touching.map((e) => e.name).filter(Boolean)),
+    pointsInside: 0, lineM: 0, polyHa: 0, crossings: new Set(), elemM: 0,
+  };
+  if (m.polygonLayer) {
     const union = unionFeatureGroup(touching.map((e) => e.feature));
-    const pointsInside = traz.points.filter((p) => turf.booleanPointInPolygon(p, union)).length;
-    const lineM = traz.lines.reduce((s, ln) => s + lineLengthInsidePolygonMeters(ctx, ln, union), 0);
-    const polyHa = traz.polys.reduce((s, pg) => {
+    m.pointsInside = traz.points.filter((p) => turf.booleanPointInPolygon(p, union)).length;
+    m.lineM = traz.lines.reduce((s, ln) => s + lineLengthInsidePolygonMeters(ctx, ln, union), 0);
+    m.polyHa = traz.polys.reduce((s, pg) => {
       const inter = polygonIntersection(pg, union);
       return s + (inter ? turf.area(inter) / 10000 : 0);
     }, 0);
-    if (pointsInside > 0) {
-      isDirect = true;
-      parts.push(pointsInside === 1 ? "el punto de la obra cae dentro" : `${pointsInside} puntos de la obra caen dentro`);
-    }
-    if (lineM > 0) {
-      if (lineM >= DIRECT_MIN_M) isDirect = true;
-      parts.push(`${formatMeters(lineM)} m de trazado dentro`);
-    }
-    if (polyHa > 0) {
-      if (polyHa >= DIRECT_MIN_HA) isDirect = true;
-      parts.push(`${formatHa(polyHa)} ha de la obra dentro`);
-    }
   } else {
     // Cruces deduplicados por posicion (~1 m): un mismo cauce puede venir en
     // dos fragmentos solapados en el borde de una tesela.
-    const crossings = new Set();
-    let elemM = 0;
     for (const e of touching) {
       for (const ln of traz.lines) {
         for (const pt of turf.lineIntersect(e.feature, ln).features) {
-          crossings.add(pt.geometry.coordinates.map((c) => c.toFixed(5)).join(","));
+          m.crossings.add(pt.geometry.coordinates.map((c) => c.toFixed(5)).join(","));
         }
       }
-      for (const pg of traz.polys) elemM += lineLengthInsidePolygonMeters(ctx, e.feature, pg);
+      for (const pg of traz.polys) m.elemM += lineLengthInsidePolygonMeters(ctx, e.feature, pg);
     }
-    if (crossings.size > 0) {
+  }
+  return m;
+}
+
+function mergeContactMeasures(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  return {
+    polygonLayer: a.polygonLayer,
+    names: new Set([...a.names, ...b.names]),
+    pointsInside: a.pointsInside + b.pointsInside,
+    lineM: a.lineM + b.lineM,
+    polyHa: a.polyHa + b.polyHa,
+    crossings: new Set([...a.crossings, ...b.crossings]),
+    elemM: a.elemM + b.elemM,
+  };
+}
+
+function contactFromMeasures(m) {
+  if (!m) return null;
+  const parts = [];
+  let isDirect = false;
+  if (m.polygonLayer) {
+    if (m.pointsInside > 0) {
       isDirect = true;
-      parts.push(crossings.size === 1 ? "la obra lo cruza 1 vez" : `la obra lo cruza ${crossings.size} veces`);
+      parts.push(m.pointsInside === 1 ? "el punto de la obra cae dentro" : `${m.pointsInside} puntos de la obra caen dentro`);
     }
-    if (elemM > 0) {
-      if (elemM >= DIRECT_MIN_M) isDirect = true;
-      parts.push(`${formatMeters(elemM)} m dentro de la obra`);
+    if (m.lineM > 0) {
+      if (m.lineM >= DIRECT_MIN_M) isDirect = true;
+      parts.push(`${formatMeters(m.lineM)} m de trazado dentro`);
+    }
+    if (m.polyHa > 0) {
+      if (m.polyHa >= DIRECT_MIN_HA) isDirect = true;
+      parts.push(`${formatHa(m.polyHa)} ha de la obra dentro`);
+    }
+  } else {
+    if (m.crossings.size > 0) {
+      isDirect = true;
+      parts.push(m.crossings.size === 1 ? "la obra lo cruza 1 vez" : `la obra lo cruza ${m.crossings.size} veces`);
+    }
+    if (m.elemM > 0) {
+      if (m.elemM >= DIRECT_MIN_M) isDirect = true;
+      parts.push(`${formatMeters(m.elemM)} m dentro de la obra`);
     }
   }
   if (parts.length === 0) parts.push("toca su borde");
-  return { kind: isDirect ? "directa" : "roce", names, text: parts.join(" · ") };
+  return { kind: isDirect ? "directa" : "roce", names: [...m.names].sort(), text: parts.join(" · ") };
 }
 
 // La explicacion de un resultado, en una frase: sensibilidad, por que
@@ -595,6 +632,95 @@ function sensitivityReason(r) {
   return `${r.sensitivity}: ${[imp, how, cuanto].filter(Boolean).join(" · ")}`;
 }
 
+// --- Vistas del analisis (analisis por tramo, rama avanzado, 2026-10-02) ---
+//
+// queryRenderedFeatures solo ve lo dibujado, al zoom de la vista. Con todo el
+// archivo en una sola vista, la oferta real de 16 tramos repartidos en ~100 km
+// se analizaba a zoom 8,8: geometria simplificada a unos 30 m, cuando el
+// umbral de roce es de 25 m. Ahora los tramos se agrupan en vistas que quepan
+// a zoom >= ANALYSIS_VIEW_MIN_ZOOM (geometria a ~4 m) y cada vista se dibuja y
+// se consulta por separado.
+//
+// Para no contar nada dos veces al sumar, los tramos cuyos buffers se tocan
+// van siempre en la misma vista: asi los buffers de vistas distintas no se
+// solapan y las hectareas y los metros de cada vista se pueden sumar. Un
+// tramo que no cabe a ese zoom (la carretera de prueba de 58 km) se analiza
+// en una sola vista, como antes.
+const ANALYSIS_VIEW_MIN_ZOOM = 11;
+
+function expandBboxMeters(b, m) {
+  const lat = (b[1] + b[3]) / 2;
+  const dLat = m / METERS_PER_DEGREE;
+  const dLon = m / (METERS_PER_DEGREE * Math.cos((lat * Math.PI) / 180));
+  return [b[0] - dLon, b[1] - dLat, b[2] + dLon, b[3] + dLat];
+}
+
+function bboxUnion(a, b) {
+  return [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[2], b[2]), Math.max(a[3], b[3])];
+}
+
+// Zoom al que fitBounds dejaria ese rectangulo (mismo padding que el analisis).
+function zoomForBbox(b) {
+  const cam = map.cameraForBounds([[b[0], b[1]], [b[2], b[3]]], { padding: 60, maxZoom: 17 });
+  return cam && typeof cam.zoom === "number" ? cam.zoom : 0;
+}
+
+// Grupos de tramos (indices de `tramos`) que se analizan juntos, en el orden
+// del archivo.
+function planAnalysisViews(tramos, maxBufferM) {
+  if (tramos.length === 1) return [[0]];
+  // 1. Inseparables: tramos cuyos buffers (el mayor de todas las capas) se tocan.
+  const parent = tramos.map((_, i) => i);
+  const find = (i) => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+  const buffers = tramos.map((t) => computeUnifiedBufferPolygon(t.geojson, maxBufferM));
+  const bufferBboxes = buffers.map((b, i) => (b ? turf.bbox(b) : expandBboxMeters(turf.bbox(tramos[i].geojson), maxBufferM)));
+  for (let i = 0; i < tramos.length; i++) {
+    for (let j = i + 1; j < tramos.length; j++) {
+      if (find(i) === find(j) || !bboxOverlap(bufferBboxes[i], bufferBboxes[j])) continue;
+      // Sin buffer calculable no se puede comprobar: mejor juntarlos.
+      if (!buffers[i] || !buffers[j] || turf.booleanIntersects(buffers[i], buffers[j])) parent[find(j)] = find(i);
+    }
+  }
+  const groups = new Map();
+  tramos.forEach((_, i) => {
+    const r = find(i);
+    if (!groups.has(r)) groups.set(r, []);
+    groups.get(r).push(i);
+  });
+
+  // 2. Se juntan grupos en una misma vista mientras quepan a ANALYSIS_VIEW_MIN_ZOOM.
+  const searchBboxes = tramos.map((t) => expandBboxMeters(turf.bbox(t.geojson), maxBufferM + NEAREST_SEARCH_MARGIN_M));
+  const views = [];
+  for (const g of groups.values()) {
+    const gb = g.map((i) => searchBboxes[i]).reduce(bboxUnion);
+    const target = views.find((v) => zoomForBbox(bboxUnion(v.bbox, gb)) >= ANALYSIS_VIEW_MIN_ZOOM);
+    if (target) {
+      target.idx.push(...g);
+      target.bbox = bboxUnion(target.bbox, gb);
+    } else {
+      views.push({ idx: [...g], bbox: gb });
+    }
+  }
+  return views.map((v) => v.idx.sort((a, b) => a - b));
+}
+
+// Puntos muestreados de los tramos de una vista, sabiendo de que tramo es
+// cada uno (ctx.tramoOf), para decir a que tramo queda mas cerca un elemento.
+function buildViewDistanceContext(tramos, idxs) {
+  const pts = [];
+  const tramoOf = [];
+  for (const i of idxs) {
+    const s = sampleTrazadoPoints(tramos[i].geojson, NEAREST_SAMPLE_KM);
+    for (const p of s) {
+      pts.push(p);
+      tramoOf.push(i);
+    }
+  }
+  const ctx = buildDistanceContext(pts);
+  ctx.tramoOf = tramoOf;
+  return ctx;
+}
+
 // overrides: { layerId: metros } -- buffer explicito elegido por el usuario
 // para esa capa en el panel de resultados (idea #2), vacio en el primer
 // analisis de un tramo.
@@ -605,6 +731,7 @@ async function analyzeUploadedLayer(u, overrides = {}) {
   }
 
   const overlay = document.getElementById("analysis-overlay");
+  const overlayText = document.getElementById("analysis-overlay-text");
   overlay.hidden = false;
 
   try {
@@ -621,23 +748,20 @@ async function analyzeUploadedLayer(u, overrides = {}) {
         : u.bufferMeters;
     }
 
+    // La obra es el archivo sin las marcas de PK (tramos.js); con un solo
+    // tramo, el archivo entero como siempre.
+    const { obra, tramos, markers } = u.tramoSplit;
+    const multi = tramos.length > 1;
+
     const globalBufferPolygon = unifyBuffer(u.bufferGeojson);
     if (!globalBufferPolygon) throw new Error("No se pudo calcular el buffer.");
 
-    // El mapa se encuadra al mayor buffer efectivo + el margen de busqueda
-    // de "elemento mas cercano" (NEAREST_SEARCH_MARGIN_M) -- si no, esas
-    // teselas ni siquiera se renderizan y queryRenderedFeatures no puede
+    // Cada vista se encuadra a su mayor buffer efectivo + el margen de
+    // busqueda de "elemento mas cercano" (NEAREST_SEARCH_MARGIN_M) -- si no,
+    // esas teselas ni siquiera se renderizan y queryRenderedFeatures no puede
     // encontrar nada fuera del buffer normal.
     const maxBufferM = Math.max(u.bufferMeters, ...Object.values(effectiveBufferM));
-    const searchPolygon = computeUnifiedBufferPolygon(u.geojson, maxBufferM + NEAREST_SEARCH_MARGIN_M);
-    if (!searchPolygon) throw new Error("No se pudo calcular el area de busqueda.");
-
-    const bbox = turf.bbox(searchPolygon);
-    map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], {
-      padding: 60,
-      animate: false,
-      maxZoom: 17,
-    });
+    const views = planAnalysisViews(tramos, maxBufferM);
 
     // Se fuerzan temporalmente visibles las capas a analizar -- MapLibre
     // solo tiene datos consultables (renderizados) para capas visibles,
@@ -645,86 +769,117 @@ async function analyzeUploadedLayer(u, overrides = {}) {
     const prevVisible = {};
     for (const l of targetLayers) {
       prevVisible[l.id] = layerVisible[l.id];
-      if (!layerVisible[l.id]) setLayerVisible(l, true);
+      if (!layerVisible[l.id] && !layerUnavailable[l.id]) setLayerVisible(l, true);
     }
 
-    // Capas en linea (zonas inundables, ver wfs-layers.js): se piden al
-    // servicio para el area de busqueda, en paralelo con la espera de abajo.
-    // No dependen de lo dibujado, asi que no les afecta el tope de espera; si
-    // el servicio falla, la capa queda marcada como SIN RESULTADO, nunca
-    // como "sin afecciones".
-    const wfsResults = {};
-    const searchBbox = turf.bbox(searchPolygon);
-    const wfsPromise = Promise.all(
-      targetLayers.filter((l) => l.wfs).map(async (l) => {
-        try {
-          const r = await fetchWfsFeatures(l, searchBbox);
-          storeWfsFeatures(l, r.features);
-          wfsResults[l.id] = { features: r.features, truncated: r.truncated, error: null };
-        } catch (e) {
-          console.warn(`Capa en línea ${l.id}:`, e);
-          wfsResults[l.id] = { features: [], truncated: false, error: e.message };
-        }
-      })
-    );
-
-    // triggerRepaint: sin cambios de camara ni de capas no habria fotograma
-    // nuevo y "idle" no volveria a dispararse, y se agotaria el tope aunque
-    // todo estuviera ya dibujado.
-    map.triggerRepaint();
-    const waitOutcome = await new Promise((resolve) => {
-      map.once("idle", () => resolve("idle"));
-      setTimeout(() => resolve("timeout"), ANALYSIS_IDLE_TIMEOUT_MS);
-    });
-    // Tope agotado = alguna capa puede no estar dibujada todavia, y saldria
-    // vacia. Antes (tope de 8 s, sin aviso) dos pasadas iguales llegaron a
-    // dar resultados distintos (caso de prueba del puerto de Carboneras,
-    // §4.1) -- ahora se avisa en el modal, el Excel y el informe.
-    const incomplete = waitOutcome !== "idle";
-    await wfsPromise;
-
-    const distCtx = buildDistanceContext(sampleTrazadoPoints(u.geojson, NEAREST_SAMPLE_KM));
-    const traz = trazadoParts(u.geojson);
-
-    const results = [];
+    // Lo medido en cada vista, acumulado por capa.
+    const acc = {};
     for (const l of targetLayers) {
-      const layerBufferM = effectiveBufferM[l.id];
-      const bufferPolygon =
-        layerBufferM === u.bufferMeters ? globalBufferPolygon : computeUnifiedBufferPolygon(u.geojson, layerBufferM);
+      acc[l.id] = {
+        entities: [], pieces: [], totalM: 0, names: new Set(), measures: null,
+        nearbyByKey: new Map(), intersectingKeys: new Set(), tramoHits: new Map(),
+        serviceError: null, truncated: false,
+      };
+    }
+    let incomplete = false;
 
-      const idsToCheck = l.geom === "polygon" ? [`${l.id}-fill`] : [`${l.id}-line`];
-      const existing = bufferPolygon ? idsToCheck.filter((id) => map.getLayer(id)) : [];
-      let count = 0;
-      let totalHa = 0;
-      let totalM = 0;
-      const names = new Set();
-      let nearby = [];
-      let contact = null;
-      let pctText = "";
+    for (let vi = 0; vi < views.length; vi++) {
+      const idxs = views[vi];
+      overlayText.textContent = views.length > 1 ? `Analizando afecciones… (zona ${vi + 1} de ${views.length})` : "Analizando afecciones…";
+      const viewGeojson = views.length === 1 ? obra : { type: "FeatureCollection", features: idxs.flatMap((i) => tramos[i].geojson.features) };
 
-      const wfsResult = l.wfs ? wfsResults[l.id] : null;
-      if (existing.length) {
+      const searchPolygon = computeUnifiedBufferPolygon(viewGeojson, maxBufferM + NEAREST_SEARCH_MARGIN_M);
+      if (!searchPolygon) throw new Error("No se pudo calcular el area de busqueda.");
+      const searchBbox = turf.bbox(searchPolygon);
+      map.fitBounds([[searchBbox[0], searchBbox[1]], [searchBbox[2], searchBbox[3]]], {
+        padding: 60,
+        animate: false,
+        maxZoom: 17,
+      });
+
+      // Capas en linea (zonas inundables, ver wfs-layers.js): se piden al
+      // servicio para el area de busqueda de la vista, en paralelo con la
+      // espera de abajo. No dependen de lo dibujado, asi que no les afecta el
+      // tope de espera; si el servicio falla, la capa queda marcada como SIN
+      // RESULTADO, nunca como "sin afecciones".
+      const wfsResults = {};
+      const wfsPromise = Promise.all(
+        targetLayers.filter((l) => l.wfs).map(async (l) => {
+          try {
+            const r = await fetchWfsFeatures(l, searchBbox);
+            storeWfsFeatures(l, r.features);
+            wfsResults[l.id] = { features: r.features, truncated: r.truncated, error: null };
+          } catch (e) {
+            console.warn(`Capa en línea ${l.id}:`, e);
+            wfsResults[l.id] = { features: [], truncated: false, error: `servicio en línea de MITECO: ${e.message}` };
+          }
+        })
+      );
+
+      // triggerRepaint: sin cambios de camara ni de capas no habria fotograma
+      // nuevo y "idle" no volveria a dispararse, y se agotaria el tope aunque
+      // todo estuviera ya dibujado.
+      map.triggerRepaint();
+      const waitOutcome = await new Promise((resolve) => {
+        map.once("idle", () => resolve("idle"));
+        setTimeout(() => resolve("timeout"), ANALYSIS_IDLE_TIMEOUT_MS);
+      });
+      // Tope agotado = alguna capa puede no estar dibujada todavia, y saldria
+      // vacia. Antes (tope de 8 s, sin aviso) dos pasadas iguales llegaron a
+      // dar resultados distintos (caso de prueba del puerto de Carboneras,
+      // §4.1) -- ahora se avisa en el modal, el Excel y el informe.
+      if (waitOutcome !== "idle") incomplete = true;
+      await wfsPromise;
+
+      const distCtx = buildViewDistanceContext(tramos, idxs);
+      const traz = trazadoParts(viewGeojson);
+      const tramoTraz = multi ? new Map(idxs.map((i) => [i, trazadoParts(tramos[i].geojson)])) : null;
+      const bufferCache = new Map(views.length === 1 ? [[u.bufferMeters, globalBufferPolygon]] : []);
+      const tramoIntersectors = new Map();
+
+      for (const l of targetLayers) {
+        const a = acc[l.id];
+        const layerBufferM = effectiveBufferM[l.id];
+        if (!bufferCache.has(layerBufferM)) bufferCache.set(layerBufferM, computeUnifiedBufferPolygon(viewGeojson, layerBufferM));
+        const bufferPolygon = bufferCache.get(layerBufferM);
+
+        // Archivo de la capa que no se pudo cargar (main.js): SIN RESULTADO,
+        // igual que una capa en linea cuyo servicio no responde -- nunca
+        // "sin afecciones".
+        if (layerUnavailable[l.id]) {
+          a.serviceError = "no se pudo cargar su archivo de datos";
+          continue;
+        }
+        const wfsResult = l.wfs ? wfsResults[l.id] : null;
+        if (wfsResult) {
+          if (wfsResult.error) a.serviceError = wfsResult.error;
+          if (wfsResult.truncated) a.truncated = true;
+        }
+        const idsToCheck = l.geom === "polygon" ? [`${l.id}-fill`] : [`${l.id}-line`];
+        const existing = bufferPolygon ? idsToCheck.filter((id) => map.getLayer(id)) : [];
+        if (!existing.length) continue;
+
         const feats = wfsResult ? wfsResult.features : map.queryRenderedFeatures(undefined, { layers: existing });
         const touchesBuffer = makeIntersector(bufferPolygon);
         const intersecting = feats.filter((f) => f.geometry && touchesBuffer(f));
 
-        // Elementos que caen en el buffer: { feature, name, props, bufferHa }.
+        // Elementos que caen en el buffer: { feature, name, props, bufferHa, key }.
         // Sirven para la superficie, los nombres, el % del espacio y el
-        // contacto directo con la obra (directContactForLayer).
+        // contacto directo con la obra (directContactMeasures). key: el id de
+        // la entidad si la capa lo tiene, para contarla una sola vez aunque
+        // salga en varias vistas.
         const entities = [];
-        const addEntity = (feature, props) => {
+        const addEntity = (feature, props, key = null) => {
           const name = featureName(l, { properties: props });
-          if (name) names.add(name);
-          count++;
-          entities.push({ feature, name, props, bufferHa: 0 });
+          if (name) a.names.add(name);
+          entities.push({ feature, name, props, bufferHa: 0, key });
         };
         // Trozos de cada elemento dentro del buffer; la superficie se mide
         // al final sobre su union (ver unionAreaHectares).
-        const pieces = [];
         const addPiece = (f) => {
           const piece = polygonIntersection(f, bufferPolygon);
           if (piece) {
-            pieces.push(piece);
+            a.pieces.push(piece);
             entities[entities.length - 1].bufferHa = turf.area(piece) / 10000;
           }
         };
@@ -742,9 +897,9 @@ async function analyzeUploadedLayer(u, overrides = {}) {
             if (!groups.has(key)) groups.set(key, []);
             groups.get(key).push(f);
           }
-          for (const group of groups.values()) {
+          for (const [key, group] of groups) {
             const merged = unionFeatureGroup(group);
-            addEntity(merged, group[0].properties);
+            addEntity(merged, group[0].properties, key);
             addPiece(merged);
           }
           // Fragmentos sin id legible (dato de origen incompleto): se
@@ -766,24 +921,33 @@ async function analyzeUploadedLayer(u, overrides = {}) {
             if (l.geom === "polygon") {
               addPiece(f);
             } else {
-              totalM += lineLengthInsidePolygonMeters(distCtx, f, bufferPolygon);
+              a.totalM += lineLengthInsidePolygonMeters(distCtx, f, bufferPolygon);
             }
           }
         }
-        if (l.geom === "polygon") totalHa = unionAreaHectares(pieces);
+        a.entities.push(...entities);
 
         // ¿La obra en si pisa algo? (no solo el buffer)
-        contact = directContactForLayer(l, entities, traz, distCtx);
+        a.measures = mergeContactMeasures(a.measures, directContactMeasures(l, entities, traz, distCtx));
 
-        // "Cuanto" en % del espacio, para el elemento con mas superficie en
-        // el buffer, si el dato de origen trae su superficie total.
-        if (l.areaHaField && entities.length) {
-          const top = entities.reduce((a, b) => (b.bufferHa > a.bufferHa ? b : a));
-          const totalElemHa = Number(top.props && top.props[l.areaHaField]);
-          if (top.bufferHa > 0 && totalElemHa > 0) {
-            const pct = Math.min(100, (top.bufferHa / totalElemHa) * 100);
-            const pctStr = pct.toLocaleString("es-ES", { maximumFractionDigits: pct < 1 ? 2 : 0 });
-            pctText = `${pctStr} % de ${top.name || "el espacio"}`;
+        // En que tramos esta cada cosa: los elementos dentro del buffer de
+        // cada tramo, y como los toca ese tramo.
+        if (multi) {
+          for (const i of idxs) {
+            const tk = `${i}:${layerBufferM}`;
+            if (!tramoIntersectors.has(tk)) {
+              const poly = computeUnifiedBufferPolygon(tramos[i].geojson, layerBufferM);
+              tramoIntersectors.set(tk, poly ? makeIntersector(poly) : () => false);
+            }
+            const inTramo = tramoIntersectors.get(tk);
+            const ents = entities.filter((e) => inTramo(e.feature));
+            if (!ents.length) continue;
+            const c = contactFromMeasures(directContactMeasures(l, ents, tramoTraz.get(i), distCtx));
+            a.tramoHits.set(i, {
+              afeccion: c ? c.kind : "entorno",
+              contactText: c ? c.text : "",
+              names: [...new Set(ents.map((e) => e.name).filter(Boolean))].sort(),
+            });
           }
         }
 
@@ -794,33 +958,80 @@ async function analyzeUploadedLayer(u, overrides = {}) {
         // (caso de prueba del puerto de Carboneras, §4.3). Los fragmentos
         // de un mismo elemento se agrupan (entityKey) y un elemento que
         // cruza el buffer no se repite aqui aunque otro trozo suyo quede
-        // fuera.
+        // fuera (tampoco si lo cruza en otra vista: ver la union de abajo).
         const intersectingSet = new Set(intersecting);
         const intersectingKeys = new Set(intersecting.map((f) => entityKey(l, f)).filter((k) => k != null));
-        const nearestByKey = new Map();
+        for (const k of intersectingKeys) a.intersectingKeys.add(k);
         for (const f of feats) {
           if (!f.geometry || intersectingSet.has(f)) continue;
           // Sin nombre ni id no hay forma de agrupar fragmentos: todos van
           // a una misma clave y solo se lista el mas cercano de ellos.
           const key = entityKey(l, f) ?? "__sin_nombre";
           if (intersectingKeys.has(key)) continue;
-          const d = minDistanceMetersToFeature(distCtx, f, layerBufferM + NEAREST_SEARCH_MARGIN_M);
-          if (!isFinite(d)) continue;
-          const prev = nearestByKey.get(key);
-          if (!prev || d < prev.distanceM) nearestByKey.set(key, { name: featureName(l, f), distanceM: d });
+          const info = minDistanceInfo(distCtx, f, layerBufferM + NEAREST_SEARCH_MARGIN_M);
+          if (!isFinite(info.distanceM)) continue;
+          const prev = a.nearbyByKey.get(key);
+          if (!prev || info.distanceM < prev.distanceM) {
+            a.nearbyByKey.set(key, { name: featureName(l, f), distanceM: info.distanceM, tramoIdx: distCtx.tramoOf[info.sampleIdx] });
+          }
         }
-        const edgeThreshold = bufferEdgeThresholdM(layerBufferM);
-        nearby = [...nearestByKey.values()]
-          .sort((a, b) => a.distanceM - b.distanceM)
-          .slice(0, NEARBY_MAX_PER_LAYER)
-          .map((e) => {
-            // El buffer es el trazado desplazado layerBufferM, asi que la
-            // distancia al borde es la resta (con 0 como minimo por el
-            // pequeno error del muestreo del trazado).
-            const edgeM = Math.max(0, e.distanceM - layerBufferM);
-            return { ...e, edgeM, atEdge: edgeM <= edgeThreshold };
-          });
       }
+    }
+    overlayText.textContent = "Analizando afecciones…";
+
+    // Juntar lo de todas las vistas, capa a capa.
+    const results = [];
+    for (const l of targetLayers) {
+      const a = acc[l.id];
+      const layerBufferM = effectiveBufferM[l.id];
+      // Una entidad con id que sale en varias vistas cuenta una vez, con la
+      // superficie de todas sumada (los buffers de vistas distintas no se
+      // solapan, ver planAnalysisViews).
+      const merged = [];
+      const byKey = new Map();
+      for (const e of a.entities) {
+        if (e.key == null) { merged.push(e); continue; }
+        const prev = byKey.get(e.key);
+        if (prev) {
+          prev.bufferHa += e.bufferHa;
+        } else {
+          const copy = { ...e };
+          byKey.set(e.key, copy);
+          merged.push(copy);
+        }
+      }
+      const count = merged.length;
+      const totalHa = l.geom === "polygon" ? unionAreaHectares(a.pieces) : 0;
+      const totalM = a.totalM;
+      const contact = contactFromMeasures(a.measures);
+
+      // "Cuanto" en % del espacio, para el elemento con mas superficie en
+      // el buffer, si el dato de origen trae su superficie total.
+      let pctText = "";
+      if (l.areaHaField && merged.length) {
+        const top = merged.reduce((x, y) => (y.bufferHa > x.bufferHa ? y : x));
+        const totalElemHa = Number(top.props && top.props[l.areaHaField]);
+        if (top.bufferHa > 0 && totalElemHa > 0) {
+          const pct = Math.min(100, (top.bufferHa / totalElemHa) * 100);
+          const pctStr = pct.toLocaleString("es-ES", { maximumFractionDigits: pct < 1 ? 2 : 0 });
+          pctText = `${pctStr} % de ${top.name || "el espacio"}`;
+        }
+      }
+
+      const edgeThreshold = bufferEdgeThresholdM(layerBufferM);
+      const nearby = [...a.nearbyByKey]
+        .filter(([k]) => !a.intersectingKeys.has(k))
+        .map(([, e]) => e)
+        .sort((x, y) => x.distanceM - y.distanceM)
+        .slice(0, NEARBY_MAX_PER_LAYER)
+        .map((e) => {
+          // El buffer es el trazado desplazado layerBufferM, asi que la
+          // distancia al borde es la resta (con 0 como minimo por el
+          // pequeno error del muestreo del trazado).
+          const edgeM = Math.max(0, e.distanceM - layerBufferM);
+          return { ...e, tramoName: multi && e.tramoIdx != null ? tramos[e.tramoIdx].name : "", edgeM, atEdge: edgeM <= edgeThreshold };
+        });
+
       const nearestM = nearby.length ? nearby[0].distanceM : null;
       const nearestName = nearby.length ? nearby[0].name : null;
       const afeccion =
@@ -833,16 +1044,43 @@ async function analyzeUploadedLayer(u, overrides = {}) {
       // Sensibilidad de los elementos solo cercanos de una capa que ademas
       // tiene algo en el buffer (tabla de cercanos).
       const nearSensitivity = sensitivityFor(importancia, "proxima");
+
+      // Por tramo: lo que cae en su buffer y, como en el entorno "a
+      // verificar", lo que queda al borde de su buffer.
+      const tramoHits = new Map(a.tramoHits);
+      for (const e of nearby) {
+        if (e.atEdge && e.tramoIdx != null && !tramoHits.has(e.tramoIdx)) {
+          tramoHits.set(e.tramoIdx, { afeccion: "borde", contactText: "", names: e.name ? [e.name] : [] });
+        }
+      }
+      const tramoList = multi
+        ? [...tramoHits].sort((x, y) => x[0] - y[0]).map(([i, h]) => ({ idx: i, name: tramos[i].name, ...h, sensitivity: sensitivityFor(importancia, h.afeccion) }))
+        : [];
+
       const r = {
-        layer: l, count, totalHa, totalM, names: [...names].sort(), nearby, nearestM, nearestName,
+        layer: l, count, totalHa, totalM, names: [...a.names].sort(), nearby, nearestM, nearestName,
         bufferM: layerBufferM, importancia, afeccion, contact, pctText, sensitivity, nearSensitivity,
+        tramos: tramoList,
         // Capa en linea que no se pudo consultar: sin resultado (no "cero").
-        serviceError: wfsResult ? wfsResult.error : null,
-        truncated: wfsResult ? wfsResult.truncated : false,
+        serviceError: a.serviceError,
+        truncated: a.truncated,
       };
       r.reason = afeccion ? sensitivityReason(r) : "";
       results.push(r);
     }
+
+    // Resumen por tramo: que toca cada uno, lo mas sensible primero.
+    const tramoSummary = multi
+      ? tramos.map((t) => {
+          const hits = [];
+          for (const r of results) {
+            const h = r.tramos.find((x) => x.idx === t.idx);
+            if (h) hits.push({ layer: r.layer, ...h });
+          }
+          hits.sort((x, y) => SENSITIVITY_LEVELS.indexOf(y.sensitivity) - SENSITIVITY_LEVELS.indexOf(x.sensitivity));
+          return { idx: t.idx, name: t.name, lengthM: t.lengthM, areaHa: t.areaHa, markers: t.markers, hits, maxSensitivity: hits.length ? hits[0].sensitivity : null };
+        })
+      : null;
 
     // Las capas se hicieron temporalmente visibles mas arriba solo para
     // poder consultarlas -- SIN este paso, una capa con afeccion real
@@ -883,8 +1121,9 @@ async function analyzeUploadedLayer(u, overrides = {}) {
     // investigacion/ejemplos-de-uso/caso-cerramiento-planta-agroindustrial.md
     // §4.2). Fix: al terminar, se reencuadra al area de los buffers
     // REALMENTE usados para el cruce (sin el margen extra de busqueda),
-    // que es lo relevante para mirar/exportar el resultado.
-    const finalViewPolygon = computeUnifiedBufferPolygon(u.geojson, maxBufferM);
+    // que es lo relevante para mirar/exportar el resultado. Con varias
+    // vistas, a toda la obra.
+    const finalViewPolygon = computeUnifiedBufferPolygon(obra, maxBufferM);
     if (finalViewPolygon) {
       const finalBbox = turf.bbox(finalViewPolygon);
       map.fitBounds([[finalBbox[0], finalBbox[1]], [finalBbox[2], finalBbox[3]]], {
@@ -908,7 +1147,7 @@ async function analyzeUploadedLayer(u, overrides = {}) {
     }
     const rings = [];
     for (const [meters, layers] of [...ringsByM].sort((a, b) => a[0] - b[0])) {
-      const polygon = computeUnifiedBufferPolygon(u.geojson, meters);
+      const polygon = computeUnifiedBufferPolygon(obra, meters);
       if (polygon) rings.push({ meters, layerNames: layers.map((l) => l.nombre.replace(/\s*\([^)]*\)\s*$/, "")), polygon });
     }
     setAnalysisBuffers(u, rings);
@@ -919,12 +1158,16 @@ async function analyzeUploadedLayer(u, overrides = {}) {
       incomplete,
       serviceErrors: results.filter((r) => r.serviceError).map((r) => ({ nombre: r.layer.nombre, error: r.serviceError })),
       truncated: results.filter((r) => r.truncated).map((r) => r.layer.nombre),
+      tramoSummary,
+      markerCount: markers.length,
+      viewCount: views.length,
     });
   } catch (e) {
     console.error(e);
     alert("Error analizando afecciones: " + e.message);
   } finally {
     overlay.hidden = true;
+    overlayText.textContent = "Analizando afecciones…";
   }
 }
 
@@ -957,16 +1200,71 @@ function formatMeters(m) {
 
 // Texto plano de un elemento cercano, para CSV/Excel/PDF (sin emojis: la
 // fuente del PDF no los tiene).
+// e.tramoName solo viene con varios tramos: el tramo que le queda mas cerca.
 function nearbyPlainText(e) {
   const edge = `${formatMeters(e.edgeM)} m fuera del buffer${e.atEdge ? ", AL BORDE DEL BUFFER" : ""}`;
-  return `${e.name || "Sin nombre"} (${formatMeters(e.distanceM)} m; ${edge})`;
+  const tramo = e.tramoName ? `; tramo ${e.tramoName}` : "";
+  return `${e.name || "Sin nombre"} (${formatMeters(e.distanceM)} m; ${edge}${tramo})`;
 }
 
 function nearbyHtml(e) {
   const edge = e.atEdge
     ? `<span class="analysis-edge-flag">⚠ al borde: ${formatMeters(e.edgeM)} m fuera del buffer</span>`
     : `<span class="analysis-edge-dist">(${formatMeters(e.edgeM)} m fuera del buffer)</span>`;
-  return `<div class="analysis-nearby-item"><strong>${escapeHtml(e.name || "Sin nombre")}</strong> · ${formatMeters(e.distanceM)} m ${edge}</div>`;
+  const tramo = e.tramoName ? ` <span class="analysis-muted">· tramo ${escapeHtml(e.tramoName)}</span>` : "";
+  return `<div class="analysis-nearby-item"><strong>${escapeHtml(e.name || "Sin nombre")}</strong> · ${formatMeters(e.distanceM)} m ${edge}${tramo}</div>`;
+}
+
+// --- Analisis por tramo: presentacion ---
+
+function isMultiTramo(meta) {
+  return !!(meta && meta.tramoSummary && meta.tramoSummary.length > 1);
+}
+
+// "Tramo 1 (directa) | Tramo 3 (en el entorno)" -- en que tramos esta lo de una capa.
+function tramosPlainText(r) {
+  return r.tramos.map((t) => `${t.name} (${AFECCION_LABEL[t.afeccion].toLowerCase()})`).join(" | ");
+}
+
+function tramoSizeText(t) {
+  if (t.lengthM > 0) return `${formatMeters(t.lengthM)} m`;
+  if (t.areaHa > 0) return `${formatHa(t.areaHa)} ha`;
+  return "punto";
+}
+
+function tramoHitPlainText(h) {
+  return `${h.layer.nombre}: ${h.sensitivity}, ${AFECCION_LABEL[h.afeccion].toLowerCase()}${h.contactText ? ` (${h.contactText})` : ""}`;
+}
+
+function tramoSummaryNote(meta) {
+  const ts = meta.tramoSummary;
+  const totalM = ts.reduce((s, t) => s + t.lengthM, 0);
+  const conAlgo = ts.filter((t) => t.hits.length).length;
+  let note = `${ts.length} tramos${totalM > 0 ? `, ${formatMeters(totalM)} m de trazado en total` : ""}; ${conAlgo} con algo en su buffer.`;
+  if (meta.markerCount) note += ` Los ${meta.markerCount} puntos a menos de ${TRAMO_MARKER_MAX_M} m de un tramo (sus PK, hitos...) se asocian a ese tramo y no se analizan como obra.`;
+  if (meta.viewCount > 1) note += ` Los tramos se han analizado en ${meta.viewCount} zonas, cada una a su propio zoom, para no perder detalle.`;
+  return note;
+}
+
+function tramoSummaryHtml(meta) {
+  let html = `<div class="analysis-nivel-block analysis-tramos-block"><h3>Resumen por tramo</h3>
+    <p class="modal-note">${escapeHtml(tramoSummaryNote(meta))}</p>
+    <table class="analysis-table analysis-tramos-table"><thead><tr>
+      <th>Sensibilidad máx.</th><th>Tramo</th><th>Longitud</th><th>Puntos asociados</th><th>En su buffer</th>
+    </tr></thead><tbody>`;
+  for (const t of meta.tramoSummary) {
+    const hits = t.hits.length
+      ? t.hits.map((h) => `<div class="analysis-tramo-hit">${sensitivityBadgeHtml(h.sensitivity)} ${escapeHtml(h.layer.nombre)} · ${escapeHtml(AFECCION_LABEL[h.afeccion].toLowerCase())}${h.contactText ? ` <span class="analysis-muted">(${escapeHtml(h.contactText)})</span>` : ""}</div>`).join("")
+      : `<span class="analysis-muted">Sin afecciones en su buffer</span>`;
+    html += `<tr>
+      <td>${t.maxSensitivity ? sensitivityBadgeHtml(t.maxSensitivity) : "-"}</td>
+      <td class="names"><strong>${escapeHtml(t.name)}</strong></td>
+      <td class="num">${tramoSizeText(t)}</td>
+      <td class="names">${t.markers.length ? escapeHtml(t.markers.join(", ")) : "-"}</td>
+      <td>${hits}</td>
+    </tr>`;
+  }
+  return html + `</tbody></table></div>`;
 }
 
 // meta: { incomplete } -- ver analyzeUploadedLayer.
@@ -1039,7 +1337,11 @@ function showAnalysisResults(u, results, meta = {}) {
     <p>Si la obra lo pisa menos de ${DIRECT_MIN_M} m o ${formatHa(DIRECT_MIN_HA)} ha (<em>roce</em>), o si queda fuera del buffer pero a menos de 50 m o del 10 % de su borde (<em>al borde</em>), cuenta como "en el entorno" y se marca <em>a verificar</em>: la diferencia puede deberse a la precisión del dato. El "cuánto" (ha, m, % del espacio) se da siempre en el porqué de cada fila. Criterio interno de Quadrante, no una clasificación reglamentaria.</p>
   </details>`;
 
-  let html = "";
+  // Con varios tramos: resumen por tramo delante y columna "Tramos" en las
+  // tablas por capa (rama avanzado).
+  const multi = isMultiTramo(meta);
+  document.getElementById("analysis-modal").classList.toggle("analysis-modal-wide", multi);
+  let html = multi ? tramoSummaryHtml(meta) : "";
   for (const nivel of ANALYSIS_NIVELES) {
     const rows = results.filter((r) => r.layer.nivel === nivel);
     const afectadas = rows.filter((r) => r.count > 0);
@@ -1049,21 +1351,25 @@ function showAnalysisResults(u, results, meta = {}) {
       html += `<p class="analysis-empty">Sin afecciones detectadas en este nivel.</p>`;
     } else {
       html += `<table class="analysis-table"><thead><tr>
-        <th>Sensibilidad</th><th>Capa</th><th>Afección</th><th>Nombres / códigos</th><th>Long. en buffer (m)</th><th>Superficie en buffer (ha)</th><th>Confirmado en campo</th>
+        <th>Sensibilidad</th><th>Capa</th><th>Afección</th><th>Nombres / códigos</th>${multi ? "<th>Tramos</th>" : ""}<th>Long. en buffer (m)</th><th>Superficie en buffer (ha)</th><th>Confirmado en campo</th>
       </tr></thead><tbody>`;
       for (const r of afectadas) {
         const nombres = r.names.length ? escapeHtml(r.names.join(", ")) : "-";
         const ha = r.totalHa > 0 ? r.totalHa.toLocaleString("es-ES", { maximumFractionDigits: 2 }) : "-";
+        const tramosCell = multi
+          ? `<td class="names analysis-tramos-cell">${r.tramos.map((t) => `<div>${escapeHtml(t.name)} <span class="analysis-muted">(${escapeHtml(AFECCION_LABEL[t.afeccion].toLowerCase())})</span></div>`).join("") || "-"}</td>`
+          : "";
         html += `<tr>
           <td>${sensitivityBadgeHtml(r.sensitivity)}</td>
           <td>${escapeHtml(r.layer.nombre)}</td>
           <td>${escapeHtml(AFECCION_LABEL[r.afeccion])}</td>
           <td class="names">${nombres}</td>
+          ${tramosCell}
           <td class="num">${r.totalM > 0 ? Math.round(r.totalM).toLocaleString("es-ES") : "-"}</td>
           <td class="num">${ha}</td>
           <td>${fieldStatusSelectHtml(u, r.layer.id)}</td>
         </tr>
-        <tr class="analysis-reason-row"><td colspan="7">Por qué — ${escapeHtml(r.reason)}</td></tr>`;
+        <tr class="analysis-reason-row"><td colspan="${multi ? 8 : 7}">Por qué — ${escapeHtml(r.reason)}</td></tr>`;
       }
       html += `</tbody></table>`;
     }
@@ -1134,12 +1440,35 @@ const RESULTS_HEADER = [
   "Elementos cercanos fuera del buffer", "Distancia al más cercano (m)", "Motivo de la sensibilidad",
   "Confirmado en campo",
 ];
-// Columnas del informe PDF (A4 apaisado, no caben las 16): indices de
-// RESULTS_HEADER y ancho en mm. El contacto con la obra va dentro del motivo.
+// Con varios tramos se anade "Tramos" justo despues de los nombres.
+function resultsHeader(meta) {
+  if (!isMultiTramo(meta)) return RESULTS_HEADER;
+  const i = RESULTS_HEADER.indexOf("Nombres/códigos") + 1;
+  return [...RESULTS_HEADER.slice(0, i), "Tramos", ...RESULTS_HEADER.slice(i)];
+}
+
+// Columnas del informe PDF (A4 apaisado, no caben las 16): nombre de la
+// columna (de RESULTS_HEADER) y ancho en mm. El contacto con la obra va
+// dentro del motivo; con varios tramos, los tramos van en su propia tabla.
 // (Longitud y Superficie a 17 mm: con 14 el titulo se partia a media palabra.)
 const REPORT_COLUMNS = [
-  [0, 18], [4, 26], [1, 18], [8, 33], [10, 17], [11, 17], [12, 40], [14, 75], [15, 17],
+  ["Sensibilidad", 18], ["Capa", 26], ["Afección", 18], ["Nombres/códigos", 33],
+  ["Longitud en el buffer (m)", 17], ["Superficie en el buffer (ha)", 17],
+  ["Elementos cercanos fuera del buffer", 40], ["Motivo de la sensibilidad", 75], ["Confirmado en campo", 17],
 ];
+
+// Hoja/tabla "Resumen por tramo" (Excel e informe PDF).
+const TRAMO_SUMMARY_HEADER = ["Sensibilidad máx.", "Tramo", "Longitud / superficie", "Puntos asociados", "En su buffer"];
+
+function tramoSummaryRows(meta) {
+  return meta.tramoSummary.map((t) => [
+    t.maxSensitivity || "-",
+    t.name,
+    tramoSizeText(t),
+    t.markers.join(", "),
+    t.hits.length ? t.hits.map(tramoHitPlainText).join("\n") : "Sin afecciones en su buffer",
+  ]);
+}
 
 // Fila por capa afectada -- o, si no hay cruce directo pero se detecto
 // algun elemento cerca (idea #4), una fila con Elementos=0 y los cercanos
@@ -1147,12 +1476,14 @@ const REPORT_COLUMNS = [
 // cercanos de fuera. Tipos ya listos para CSV (todo texto) o Excel
 // (numeros como numeros, no como texto) -- comparten esta funcion para no
 // mantener la logica de "que va en cada columna" por duplicado.
-function resultsToRows(u, results) {
+function resultsToRows(u, results, meta = {}) {
   const fieldStatus = u.fieldStatus || {};
+  const multi = isMultiTramo(meta);
+  const tramosIdx = RESULTS_HEADER.indexOf("Nombres/códigos") + 1;
   const rows = [];
   for (const r of results) {
     if (r.count === 0 && r.nearby.length === 0) continue;
-    rows.push([
+    const row = [
       r.sensitivity,
       AFECCION_LABEL[r.afeccion] || "",
       r.importancia,
@@ -1169,7 +1500,9 @@ function resultsToRows(u, results) {
       r.nearestM != null ? Math.round(r.nearestM) : "",
       r.reason,
       fieldStatus[r.layer.id] || FIELD_STATUS_OPTIONS[0],
-    ]);
+    ];
+    if (multi) row.splice(tramosIdx, 0, tramosPlainText(r));
+    rows.push(row);
   }
   return rows;
 }
@@ -1186,6 +1519,7 @@ function analysisNotes(u, meta = {}) {
   notes.push(
     ["Nota", "Estimación de cribado a partir de teselas vectoriales — no sustituye el análisis en QGIS."],
     ["Buffer", `Buffer por defecto del tramo: ${bufferLabel(u.bufferMeters)}. Algunas capas pueden usar uno distinto — ver columna 'Buffer aplicado (m)'.`],
+    ...(isMultiTramo(meta) ? [["Tramos", `${tramoSummaryNote(meta)} El resumen por tramo dice qué hay en el buffer de cada tramo y cómo lo toca; en el Excel, la columna 'Tramos' lo dice además capa a capa.`]] : []),
     ["Cercanos", `Elementos fuera del buffer hasta ${NEAREST_SEARCH_MARGIN_M / 1000} km más allá de él (como mucho ${NEARBY_MAX_PER_LAYER} por capa). La distancia se mide desde el trazado; se marca "AL BORDE DEL BUFFER" si queda a menos de 50 m o del 10 % del buffer fuera de su borde.`],
     ["Cobertura", ANALYSIS_COVERAGE_NOTE],
     ["Zonas inundables", `${ANALYSIS_FLOOD_COVERAGE_NOTE} Se consultan en vivo al servicio del SNCZI (MITECO) en el momento del análisis; geometría con precisión de ~10 m.`],
@@ -1201,9 +1535,9 @@ function csvField(s) {
 
 document.getElementById("analysis-download-csv").addEventListener("click", () => {
   if (!lastAnalysisResults) return;
-  const { u, results } = lastAnalysisResults;
-  let csv = RESULTS_HEADER.join(",") + "\n";
-  for (const row of resultsToRows(u, results)) {
+  const { u, results, meta } = lastAnalysisResults;
+  let csv = resultsHeader(meta).join(",") + "\n";
+  for (const row of resultsToRows(u, results, meta)) {
     csv += row.map((v) => (typeof v === "number" ? v : csvField(v))).join(",") + "\n";
   }
   const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
@@ -1227,24 +1561,26 @@ const XLSX_BAND_FILL = "FFF2F2F2";
 
 document.getElementById("analysis-download-xlsx").addEventListener("click", async () => {
   if (!lastAnalysisResults) return;
-  const { u, results } = lastAnalysisResults;
+  const { u, results, meta } = lastAnalysisResults;
   // Mismo criterio que resultsToRows: afectadas de verdad + "cerca, sin
   // cruce directo" (idea #4) -- en ese mismo orden, para que fila a fila
   // coincida uno a uno con `rows`.
   const exportable = results.filter((r) => r.count > 0 || r.nearby.length > 0);
-  const rows = resultsToRows(u, results); // mismo filtro/orden que `exportable`
+  const rows = resultsToRows(u, results, meta); // mismo filtro/orden que `exportable`
+  const baseHeader = resultsHeader(meta);
 
   // Color como columna aparte (idea #10: capa + fuente citables sin salir
   // del Excel) -- Buffer/Distancia/Confirmado en campo son las nuevas
   // columnas de las ideas #2/#4/#6 del informe de investigacion. La
   // Sensibilidad (idea #1) va primero, es lo primero que hay que mirar.
   // RESULTS_HEADER con una columna "Color" justo despues de "Capa".
-  const CAPA_IDX = RESULTS_HEADER.indexOf("Capa");
-  const header = [...RESULTS_HEADER.slice(0, CAPA_IDX + 1), "Color", ...RESULTS_HEADER.slice(CAPA_IDX + 1)];
+  const CAPA_IDX = baseHeader.indexOf("Capa");
+  const header = [...baseHeader.slice(0, CAPA_IDX + 1), "Color", ...baseHeader.slice(CAPA_IDX + 1)];
   const tableRows = rows.map((row) => [...row.slice(0, CAPA_IDX + 1), "", ...row.slice(CAPA_IDX + 1)]);
   const COLOR_COL = CAPA_IDX + 2; // 1-based
-  const wrapCols = ["Nombres/códigos", "Contacto con la obra", "Elementos cercanos fuera del buffer", "Motivo de la sensibilidad"]
-    .map((h) => header.indexOf(h) + 1);
+  const wrapCols = ["Nombres/códigos", "Tramos", "Contacto con la obra", "Elementos cercanos fuera del buffer", "Motivo de la sensibilidad"]
+    .map((h) => header.indexOf(h) + 1)
+    .filter((c) => c > 0);
 
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet("Afecciones");
@@ -1261,8 +1597,14 @@ document.getElementById("analysis-download-xlsx").addEventListener("click", asyn
     rows: tableRows,
   });
 
-  [14, 16, 12, 6, 30, 4, 24, 12, 10, 40, 40, 16, 16, 55, 14, 70, 18].forEach((w, i) => {
-    sheet.getColumn(i + 1).width = w;
+  const XLSX_WIDTHS = {
+    "Sensibilidad": 14, "Afección": 16, "Importancia": 12, "Nivel": 6, "Capa": 30, "Color": 4, "Fuente": 24,
+    "Buffer aplicado (m)": 12, "Elementos": 10, "Nombres/códigos": 40, "Tramos": 45, "Contacto con la obra": 40,
+    "Longitud en el buffer (m)": 16, "Superficie en el buffer (ha)": 16, "Elementos cercanos fuera del buffer": 55,
+    "Distancia al más cercano (m)": 14, "Motivo de la sensibilidad": 70, "Confirmado en campo": 18,
+  };
+  header.forEach((h, i) => {
+    sheet.getColumn(i + 1).width = XLSX_WIDTHS[h] || 14;
   });
 
   sheet.getRow(1).eachCell((cell) => {
@@ -1292,6 +1634,38 @@ document.getElementById("analysis-download-xlsx").addEventListener("click", asyn
   });
 
   sheet.views = [{ state: "frozen", ySplit: 1 }];
+
+  // Con varios tramos: hoja "Tramos", un tramo por fila, con su
+  // sensibilidad maxima coloreada y lo que hay en su buffer.
+  if (isMultiTramo(meta)) {
+    const tSheet = workbook.addWorksheet("Tramos");
+    tSheet.addTable({
+      name: "TablaTramos",
+      ref: "A1",
+      headerRow: true,
+      style: { showRowStripes: false },
+      columns: TRAMO_SUMMARY_HEADER.map((name) => ({ name })),
+      rows: tramoSummaryRows(meta),
+    });
+    [16, 36, 16, 30, 90].forEach((w, i) => { tSheet.getColumn(i + 1).width = w; });
+    tSheet.getRow(1).eachCell((cell) => {
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: XLSX_HEADER_FILL } };
+      cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+    });
+    meta.tramoSummary.forEach((t, i) => {
+      const row = tSheet.getRow(i + 2);
+      const band = i % 2 === 1 ? XLSX_BAND_FILL : "FFFFFFFF";
+      for (let c = 1; c <= TRAMO_SUMMARY_HEADER.length; c++) {
+        row.getCell(c).fill = { type: "pattern", pattern: "solid", fgColor: { argb: band } };
+        row.getCell(c).alignment = { wrapText: true, vertical: "top" };
+      }
+      if (t.maxSensitivity) {
+        row.getCell(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF" + SENSITIVITY_COLOR[t.maxSensitivity].replace("#", "") } };
+        row.getCell(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
+      }
+    });
+    tSheet.views = [{ state: "frozen", ySplit: 1 }];
+  }
 
   const infoSheet = workbook.addWorksheet("Info");
   infoSheet.getColumn(1).width = 16;

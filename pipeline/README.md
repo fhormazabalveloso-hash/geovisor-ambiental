@@ -46,6 +46,24 @@ subir `maxzoom` hacia abajo, simplificar geometría, o (si no queda otra)
 usar Git LFS / GitHub Releases para ese archivo en vez de commitearlo
 directo. Esto es más probable en las capas grandes (ver siguiente sección).
 
+## Infraestructuras con PK (rama `avanzado`)
+
+La red ferroviaria y las carreteras del Estado, con sus puntos kilométricos,
+salen de la Red de Transporte del IGN (carpeta `17-ferrocarriles-espana`,
+junto a la del catálogo ambiental). Necesitan un filtrado previo (solo tren,
+solo titularidad del Estado, un PK por carretera y km, nombre de línea en cada
+PK), así que tienen su propio script en vez de una entrada en `config.yaml`:
+
+```powershell
+python pipeline\build_infraestructuras.py                 # las dos redes
+python pipeline\build_infraestructuras.py --only ffcc      # solo ferrocarril
+```
+
+Salida: `data-web/ffcc.pmtiles` y `data-web/carreteras_estado.pmtiles`, cada
+uno con dos capas (`lineas` y `pk`). La red viaria del IGN (1,55 GB) viene
+dentro de un zip: el script la extrae una vez a la carpeta temporal, fuera de
+OneDrive.
+
 ## Capas grandes - aparte
 
 Cinco capas parten de shapefiles de 1-1.9 GB (inundabilidad T10/T100/T500,

@@ -187,7 +187,8 @@ function computeBuffer(u) {
     u.bufferGeojson = { type: "FeatureCollection", features: [] };
     return;
   }
-  const buffered = turf.buffer(u.geojson, u.bufferMeters / 1000, { units: "kilometers" });
+  // Sobre la obra (tramos.js): las marcas de PK no llevan buffer propio.
+  const buffered = turf.buffer(u.tramoSplit.obra, u.bufferMeters / 1000, { units: "kilometers" });
   u.bufferGeojson = buffered.type === "FeatureCollection" ? buffered : { type: "FeatureCollection", features: [buffered] };
 }
 
@@ -465,6 +466,7 @@ function addUploadedLayer(name, geojson) {
     id: `upload-${n}`,
     name,
     geojson: fc,
+    tramoSplit: splitTramosSafe(fc, name),
     bufferGeojson: { type: "FeatureCollection", features: [] },
     color: uploadColorFor(n),
     visible: true,

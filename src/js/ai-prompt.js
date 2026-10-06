@@ -43,12 +43,13 @@ function aiFieldStatus(u, layerId) {
 
 // Descripcion breve de la geometria subida: longitud de las lineas, area y
 // perimetro de los poligonos, numero de puntos.
+// Las marcas de PK (tramos.js) no son obra: se mide solo lo analizado.
 function describeTrazado(u) {
   let lineM = 0;
   let polyHa = 0;
   let polyPerimM = 0;
   let points = 0;
-  for (const f of u.geojson.features) {
+  for (const f of u.tramoSplit.obra.features) {
     if (!f.geometry) continue;
     const t = f.geometry.type;
     if (t === "LineString" || t === "MultiLineString") {
@@ -66,7 +67,11 @@ function describeTrazado(u) {
   if (lineM > 0) parts.push(`trazado lineal de ${formatMeters(lineM)} m`);
   if (polyHa > 0) parts.push(`superficie de ${formatHa(polyHa)} ha (perímetro de ${formatMeters(polyPerimM)} m)`);
   if (points > 0) parts.push(`${points} punto${points === 1 ? "" : "s"}`);
-  return parts.length ? parts.join(" + ") : "geometría sin medidas";
+  let text = parts.length ? parts.join(" + ") : "geometría sin medidas";
+  const { tramos, markers } = u.tramoSplit;
+  if (tramos.length > 1) text += `, en ${tramos.length} tramos`;
+  if (markers.length) text += ` (más ${markers.length} puntos de PK o hitos de los tramos, no analizados como obra)`;
+  return text;
 }
 
 function aiDefaultProjectName(u) {
@@ -82,6 +87,7 @@ function buildAiPrompt(u, results, meta, opts) {
   const clean = results.filter((r) => r.count === 0 && r.nearby.length === 0 && !r.serviceError);
   const noData = results.filter((r) => r.serviceError);
   const workType = opts.workType || "Sin especificar";
+  const multi = isMultiTramo(meta);
 
   const lines = [];
   lines.push(
@@ -95,6 +101,7 @@ function buildAiPrompt(u, results, meta, opts) {
     "- Un hallazgo descartado en campo menciónalo solo como comprobado y descartado.",
     "- Si la obra es de costa o mar, di en las limitaciones que el cribado no incluye el Dominio Público Marítimo-Terrestre ni los hábitats marinos.",
     "- Español de España, tono técnico y prudente, sin emojis ni tablas. Entre 250 y 400 palabras.",
+    ...(multi ? ["- La obra tiene varios tramos: di en qué tramos está cada afección (usa sus nombres tal cual) y cuáles no tienen ninguna."] : []),
     "",
     "Estructura:",
     "1. Resumen (2-3 frases).",
@@ -108,10 +115,16 @@ function buildAiPrompt(u, results, meta, opts) {
     `- Tipo de obra: ${workType}`,
     `- Geometría analizada: ${describeTrazado(u)}`,
     `- Buffer general: ${bufferLabel(u.bufferMeters)} (algunas capas usan uno propio, indicado en cada una)`,
-    `- Fecha del análisis: ${new Date().toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit", year: "numeric" })}`,
-    "",
-    "AFECCIONES DIRECTAS (la capa cruza el trazado o su buffer)"
+    `- Fecha del análisis: ${new Date().toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit", year: "numeric" })}`
   );
+  if (multi) {
+    lines.push("", "AFECCIONES POR TRAMO (lo que hay en el buffer de cada tramo y cómo lo toca)");
+    for (const t of meta.tramoSummary) {
+      const pk = t.markers.length ? ` [puntos: ${t.markers.join(", ")}]` : "";
+      lines.push(`- ${t.name} (${tramoSizeText(t)})${pk}: ${t.hits.length ? t.hits.map(tramoHitPlainText).join("; ") : "sin afecciones en su buffer"}.`);
+    }
+  }
+  lines.push("", "AFECCIONES DIRECTAS (la capa cruza el trazado o su buffer)");
   if (hits.length === 0) {
     lines.push("- Ninguna.");
   }
@@ -136,6 +149,7 @@ function buildAiPrompt(u, results, meta, opts) {
     const items = r.nearby.map(
       (e) =>
         `${e.name || "sin nombre"} a ${formatMeters(e.distanceM)} m (${formatMeters(e.edgeM)} m fuera del buffer de ${bufferLabel(r.bufferM)})` +
+        (e.tramoName ? `, junto al tramo ${e.tramoName}` : "") +
         (e.atEdge ? " AL BORDE DEL BUFFER" : "")
     );
     const estado = r.count === 0 ? ` Comprobación en campo: ${aiFieldStatus(u, r.layer.id)}.` : "";
@@ -147,7 +161,7 @@ function buildAiPrompt(u, results, meta, opts) {
   if (noData.length) {
     lines.push(
       "",
-      "CAPAS SIN DATOS (el servicio en línea no respondió; NO significa que no haya afección, dilo así)",
+      "CAPAS SIN DATOS (no se pudieron consultar; NO significa que no haya afección, dilo así)",
       `- ${noData.map((r) => r.layer.nombre).join("; ")}.`
     );
   }
