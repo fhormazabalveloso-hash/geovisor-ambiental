@@ -855,6 +855,12 @@ Este documento se centra en el **Componente 1**.
     del código y del README las referencias a la oferta real y se juntaron
     en un solo commit los cambios desde la versión piloto, para que no
     quedaran en el historial público.
+  - **Fix tras publicar:** la portada del piloto salió sin estilos en un
+    navegador que ya había abierto el visor. GitHub Pages deja cada archivo
+    10 min en la caché del navegador (`max-age=600`), así que se mezclaban el
+    HTML nuevo con el CSS viejo. Ahora todos los CSS y JS propios llevan
+    versión en la URL (`style.css?v=20261006`): **en cada publicación hay
+    que cambiar esa fecha** en `src/index.html`.
 
 ---
 

@@ -6,7 +6,12 @@
   <title>Geovisor Ambiental - Quadrante</title>
 
   <link href="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.css" rel="stylesheet" />
-  <link href="css/style.css" rel="stylesheet" />
+  <!-- ASSET_VERSION: GitHub Pages deja cada archivo 10 min en la cache del
+       navegador (max-age=600). Sin version en la URL, tras publicar se
+       mezclaban el HTML nuevo con CSS/JS viejos (2026-10-06: la portada salio
+       sin estilos). En cada publicacion, cambiar ?v= (la fecha) en TODOS
+       los css/ y js/ propios de este archivo. -->
+  <link href="css/style.css?v=20261006" rel="stylesheet" />
 </head>
 <body>
   <!-- Portada de entrada (2026-10-06, pedido por Francisco): solo presentacion,
@@ -24,8 +29,8 @@
     <p class="portada-pie">Datos oficiales de MITECO, IGN y SNCZI</p>
   </div>
   <!-- config.js antes que la portada: la portada y el pie dicen que version es. -->
-  <script src="js/config.js"></script>
-  <script src="js/portada.js"></script>
+  <script src="js/config.js?v=20261006"></script>
+  <script src="js/portada.js?v=20261006"></script>
 
   <div id="app">
     <div id="map-container">
@@ -206,13 +211,13 @@
   <script src="https://unpkg.com/jszip@3/dist/jszip.min.js"></script>
   <script src="https://unpkg.com/exceljs@4/dist/exceljs.min.js"></script>
   <script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
-  <script src="js/layers.js"></script>
-  <script src="js/main.js"></script>
-  <script src="js/wfs-layers.js"></script>
-  <script src="js/export.js"></script>
-  <script src="js/tramos.js"></script>
-  <script src="js/upload.js"></script>
-  <script src="js/analysis.js"></script>
-  <script src="js/ai-prompt.js"></script>
+  <script src="js/layers.js?v=20261006"></script>
+  <script src="js/main.js?v=20261006"></script>
+  <script src="js/wfs-layers.js?v=20261006"></script>
+  <script src="js/export.js?v=20261006"></script>
+  <script src="js/tramos.js?v=20261006"></script>
+  <script src="js/upload.js?v=20261006"></script>
+  <script src="js/analysis.js?v=20261006"></script>
+  <script src="js/ai-prompt.js?v=20261006"></script>
 </body>
 </html>
