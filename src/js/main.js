@@ -6,8 +6,10 @@
 // completo siempre) y rompe la carga de capas con el error "Server
 // returned no content-length header...". Usar en su lugar:
 //   pip install rangehttpserver
-//   python -m RangeHTTPServer 8000
+//   python dev_server.py 8000
 // desde la raiz del proyecto, y abrir http://localhost:8000/src/index.html
+// (dev_server.py = RangeHTTPServer + intermediario de las zonas inundables
+// de MITECO, ver wfs-layers.js)
 // GitHub Pages sí soporta rangos de forma nativa, sin necesidad de nada de
 // esto en producción.
 

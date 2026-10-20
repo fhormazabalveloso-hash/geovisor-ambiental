@@ -99,13 +99,17 @@ function buildAiPrompt(u, results, meta, opts) {
     "- Deja claro que es un cribado previo con cartografía oficial, no un estudio de detalle, y que los hallazgos deben confirmarse en campo y con el análisis SIG definitivo.",
     '- Menciona expresamente los elementos marcados "AL BORDE DEL BUFFER".',
     "- Un hallazgo descartado en campo menciónalo solo como comprobado y descartado.",
-    "- Si la obra es de costa o mar, di en las limitaciones que el cribado no incluye el Dominio Público Marítimo-Terrestre ni los hábitats marinos.",
+    // Revision critica 2026-10-19: "sin hallazgos" no es "no afecta", y lo
+    // que el catalogo no cubre no se ha mirado.
+    '- Nunca escribas que la obra "no afecta" a algo: di que el cribado no ha detectado elementos en las capas consultadas.',
+    "- Lo que el catálogo no cubre (ver Cobertura en las notas) no se ha analizado: inclúyelo en limitaciones y, si es relevante para el tipo de obra, en recomendaciones. No digas que no hay afección en esos temas.",
+    "- Distingue la afección directa (la obra pisa el elemento) de la que solo está en el entorno (dentro del buffer).",
     "- Español de España, tono técnico y prudente, sin emojis ni tablas. Entre 250 y 400 palabras.",
     ...(multi ? ["- La obra tiene varios tramos: di en qué tramos está cada afección (usa sus nombres tal cual) y cuáles no tienen ninguna."] : []),
     "",
     "Estructura:",
     "1. Resumen (2-3 frases).",
-    "2. Afecciones directas.",
+    "2. Afecciones (dentro del buffer), primero las directas.",
     "3. Elementos próximos.",
     "4. Recomendaciones (estudios o comprobaciones a prever en la oferta).",
     "5. Limitaciones del cribado.",
@@ -124,7 +128,7 @@ function buildAiPrompt(u, results, meta, opts) {
       lines.push(`- ${t.name} (${tramoSizeText(t)})${pk}: ${t.hits.length ? t.hits.map(tramoHitPlainText).join("; ") : "sin afecciones en su buffer"}.`);
     }
   }
-  lines.push("", "AFECCIONES DIRECTAS (la capa cruza el trazado o su buffer)");
+  lines.push("", "ELEMENTOS DENTRO DEL BUFFER (en cada uno, \"Afección\" dice si la obra lo pisa -directa-, si solo está en el entorno o si es un roce a verificar)");
   if (hits.length === 0) {
     lines.push("- Ninguna.");
   }
@@ -156,7 +160,7 @@ function buildAiPrompt(u, results, meta, opts) {
     lines.push(`- ${r.layer.nombre} [${NIVEL_LABEL[r.layer.nivel]}; sensibilidad ${r.count > 0 ? r.nearSensitivity : r.sensitivity}]: ${items.join("; ")}.${estado}`);
   }
 
-  lines.push("", "CAPAS ANALIZADAS SIN HALLAZGOS");
+  lines.push("", "CAPAS CONSULTADAS SIN HALLAZGOS (ni en el buffer ni cerca; no prueba ausencia, solo que el dato oficial no recoge nada)");
   lines.push(clean.length ? `- ${clean.map((r) => `${r.layer.nombre} (buffer ${bufferLabel(r.bufferM)})`).join("; ")}.` : "- Ninguna.");
   if (noData.length) {
     lines.push(
@@ -177,6 +181,9 @@ function buildAiPrompt(u, results, meta, opts) {
   );
   if (meta && meta.incomplete) {
     lines.push(`- AVISO: ${ANALYSIS_INCOMPLETE_NOTE}`);
+  }
+  if (meta && meta.truncated && meta.truncated.length) {
+    lines.push(`- AVISO: el servicio en línea devolvió el máximo de elementos para ${meta.truncated.join(", ")}; puede faltar alguno. Dilo en las limitaciones.`);
   }
   return lines.join("\n");
 }

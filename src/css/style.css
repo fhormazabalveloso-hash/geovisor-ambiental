@@ -1106,6 +1106,18 @@ html, body {
   font-size: 11.5px;
 }
 
+/* "Capas consultadas" (analysis.js, 2026-10-19): las capas sin resultado
+   en rojo suave, como los avisos de .analysis-incomplete-note. */
+.analysis-layer-status .analysis-table {
+  margin-top: 6px;
+}
+
+.analysis-status-nodata td {
+  background: #FFEBEE;
+  color: #B71C1C;
+  font-weight: 600;
+}
+
 .modal-actions {
   display: flex;
   justify-content: flex-end;

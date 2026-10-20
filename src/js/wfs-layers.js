@@ -1,4 +1,9 @@
-// Capas EN LINEA (l.wfs en layers.js): hoy las zonas inundables del SNCZI,
+// HOY SIN USO (2026-10-20): las zonas inundables, unicas capas en linea, se
+// sirven ya desde data-web/ (pipeline/build_inundables.py) porque el WFS de
+// MITECO dejo de ser legible desde el navegador. Se conserva el mecanismo por
+// si hace falta otra capa en linea (p. ej. el DPMT). Descripcion original:
+//
+// Capas EN LINEA (l.wfs en layers.js): las zonas inundables del SNCZI,
 // consultadas en vivo al servicio WFS de MITECO en vez de teselarlas en
 // data-web/ (las laminas T10/T100/T500 de origen pesan 1-1,9 GB cada una y
 // eran 3 de las 5 capas grandes pendientes -- ver README §9).
@@ -18,7 +23,13 @@
 // Usa wfsData / wfsFeatureCollection / wfsLabelCollection de main.js
 // (cargado antes en index.html).
 
-const WFS_URL = "https://gis.miteco.gob.es/geoserver/wfs";
+// En local se pasa por el intermediario de dev_server.py (2026-10-13): el
+// GeoServer de MITECO manda "Access-Control-Allow-Origin: *, *" (duplicada)
+// y el navegador bloquea la respuesta directa. La web publicada sigue
+// llamando a MITECO directamente (alli no hay intermediario); si MITECO no lo
+// ha corregido, la capa sale como "Servicio de MITECO no disponible".
+const WFS_VIA_LOCAL_PROXY = ["localhost", "127.0.0.1"].includes(location.hostname);
+const WFS_URL = WFS_VIA_LOCAL_PROXY ? "/miteco-wfs" : "https://gis.miteco.gob.es/geoserver/wfs";
 const WFS_MAX_FEATURES = 500;
 const WFS_TIMEOUT_MS = 20000;
 // Por encima de esta diagonal de vista no se cargan en el mapa: con media

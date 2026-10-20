@@ -506,25 +506,114 @@ async function addUploadedLayerWhenReady(name, geojson) {
   }
 }
 
+// --- Comprobacion de coordenadas del archivo subido (revision critica
+// 2026-10-19) ---
+// KML/KMZ siempre vienen en grados y shpjs reproyecta solo con el .prj, pero
+// un GeoJSON se usaba tal cual: uno exportado en UTM salia dibujado en
+// cualquier parte sin ningun aviso. Ahora se reproyecta si declara un sistema
+// conocido (miembro "crs", habitual al exportar de QGIS) y si no, se rechaza
+// con un mensaje claro.
+const UPLOAD_CRS_DEFS = {
+  3857: "+proj=merc +a=6378137 +b=6378137 +lat_ts=0 +lon_0=0 +x_0=0 +y_0=0 +k=1 +units=m +no_defs",
+  4258: "+proj=longlat +ellps=GRS80 +no_defs",
+};
+for (const zone of [28, 29, 30, 31]) {
+  UPLOAD_CRS_DEFS[25800 + zone] = `+proj=utm +zone=${zone} +ellps=GRS80 +units=m +no_defs`;
+  UPLOAD_CRS_DEFS[32600 + zone] = `+proj=utm +zone=${zone} +datum=WGS84 +units=m +no_defs`;
+}
+// ED50: transformacion aproximada de 3 parametros (error de unos metros,
+// suficiente para un cribado; se avisa).
+for (const zone of [29, 30, 31]) {
+  UPLOAD_CRS_DEFS[23000 + zone] = `+proj=utm +zone=${zone} +ellps=intl +towgs84=-87,-98,-121,0,0,0,0 +units=m +no_defs`;
+}
+
+function declaredEpsg(geojson) {
+  const name = geojson && geojson.crs && geojson.crs.properties && geojson.crs.properties.name;
+  if (!name) return null;
+  if (/CRS84$/i.test(name)) return 4326;
+  const m = String(name).match(/EPSG:{1,2}(\d+)/i);
+  return m ? Number(m[1]) : null;
+}
+
+function mapGeojsonCoords(geojson, fn) {
+  const walk = (c) => (typeof c[0] === "number" ? fn(c) : c.map(walk));
+  const geom = (g) => {
+    if (!g) return g;
+    if (g.type === "GeometryCollection") return { ...g, geometries: g.geometries.map(geom) };
+    return { ...g, coordinates: walk(g.coordinates) };
+  };
+  if (geojson.type === "FeatureCollection") return { ...geojson, features: geojson.features.map((f) => ({ ...f, geometry: geom(f.geometry) })) };
+  if (geojson.type === "Feature") return { ...geojson, geometry: geom(geojson.geometry) };
+  return geom(geojson);
+}
+
+function geojsonExtent(geojson) {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  mapGeojsonCoords(geojson, (c) => {
+    if (c[0] < minX) minX = c[0];
+    if (c[0] > maxX) maxX = c[0];
+    if (c[1] < minY) minY = c[1];
+    if (c[1] > maxY) maxY = c[1];
+    return c;
+  });
+  return [minX, minY, maxX, maxY];
+}
+
+// Devuelve { geojson, notes } en grados (EPSG:4326), o lanza un error.
+function normalizeUploadedCoords(geojson) {
+  const notes = [];
+  const epsg = declaredEpsg(geojson);
+  if (epsg && epsg !== 4326) {
+    const def = UPLOAD_CRS_DEFS[epsg];
+    if (!def) throw new Error(`El archivo está en EPSG:${epsg}, que el visor no sabe convertir. Expórtalo en EPSG:4326 (WGS84) o en ETRS89 UTM.`);
+    geojson = mapGeojsonCoords(geojson, (c) => [...proj4(def, "EPSG:4326", [c[0], c[1]]), ...c.slice(2)]);
+    notes.push(`convertido de EPSG:${epsg} a grados${epsg >= 23029 && epsg <= 23031 ? " (ED50: conversión aproximada, error de unos metros)" : ""}`);
+  }
+  if (geojson.crs) {
+    geojson = { ...geojson };
+    delete geojson.crs;
+  }
+  const [minX, minY, maxX, maxY] = geojsonExtent(geojson);
+  if (!isFinite(minX)) throw new Error("El archivo no contiene geometrías.");
+  if (Math.max(Math.abs(minX), Math.abs(maxX)) > 180 || Math.max(Math.abs(minY), Math.abs(maxY)) > 90) {
+    throw new Error("Las coordenadas no están en grados: parece un archivo en UTM sin el sistema declarado. Expórtalo en EPSG:4326 (WGS84), o como SHP en .zip con su .prj.");
+  }
+  // Latitud y longitud cambiadas (pasa con algunos conversores): en España
+  // la longitud va de -19 a 5 y la latitud de 27 a 44.
+  const inSpain = (x0, y0, x1, y1) => x0 >= -19.5 && x1 <= 5.5 && y0 >= 27 && y1 <= 44.5;
+  if (!inSpain(minX, minY, maxX, maxY) && inSpain(minY, minX, maxY, maxX)) {
+    throw new Error("Las coordenadas parecen tener la latitud y la longitud intercambiadas. Revisa la exportación del archivo.");
+  }
+  if (!inSpain(minX, minY, maxX, maxY)) notes.push("la geometría queda fuera de España: comprueba que el sistema de coordenadas es el correcto");
+  return { geojson, notes };
+}
+
+// Devuelve { geojson, notes }.
 async function parseUploadedFile(file) {
   const name = file.name.toLowerCase();
 
   if (name.endsWith(".geojson") || name.endsWith(".json")) {
     const text = await file.text();
-    return JSON.parse(text);
+    return normalizeUploadedCoords(JSON.parse(text));
   }
 
   if (name.endsWith(".zip")) {
     const buffer = await file.arrayBuffer();
     const result = await shp(buffer);
-    // shpjs devuelve un FeatureCollection, o un array si el zip trae varias capas
-    return Array.isArray(result) ? result[0] : result;
+    // shpjs devuelve un FeatureCollection, o un array si el zip trae varias
+    // capas. Antes solo se usaba la primera y el resto se perdia sin aviso;
+    // ahora se cargan todas juntas (como las carpetas de un KMZ).
+    if (!Array.isArray(result)) return normalizeUploadedCoords(result);
+    const merged = { type: "FeatureCollection", features: result.flatMap((fc) => fc.features || []) };
+    const { geojson, notes } = normalizeUploadedCoords(merged);
+    const names = result.map((fc) => fc.fileName || "sin nombre").join(", ");
+    return { geojson, notes: [`el ZIP trae ${result.length} capas (${names}); se han cargado juntas`, ...notes] };
   }
 
   if (name.endsWith(".kml")) {
     const text = await file.text();
     const xml = new DOMParser().parseFromString(text, "text/xml");
-    return toGeoJSON.kml(xml);
+    return normalizeUploadedCoords(toGeoJSON.kml(xml));
   }
 
   if (name.endsWith(".kmz")) {
@@ -534,7 +623,7 @@ async function parseUploadedFile(file) {
     if (!kmlEntry) throw new Error("El KMZ no contiene ningún archivo .kml dentro.");
     const kmlText = await kmlEntry.async("text");
     const xml = new DOMParser().parseFromString(kmlText, "text/xml");
-    return toGeoJSON.kml(xml);
+    return normalizeUploadedCoords(toGeoJSON.kml(xml));
   }
 
   throw new Error("Formato no soportado. Usa GeoJSON, SHP (en .zip), KML o KMZ.");
@@ -567,10 +656,12 @@ uploadFileInput.addEventListener("change", async () => {
   showUploadStatus(`Procesando ${files.length} archivo${files.length === 1 ? "" : "s"}...`, "");
   let ok = 0;
   const errors = [];
+  const notes = [];
   for (const file of files) {
     try {
-      const geojson = await parseUploadedFile(file);
-      await addUploadedLayerWhenReady(file.name, geojson);
+      const parsed = await parseUploadedFile(file);
+      await addUploadedLayerWhenReady(file.name, parsed.geojson);
+      for (const n of parsed.notes) notes.push(`${file.name}: ${n}`);
       ok++;
     } catch (e) {
       console.error(e);
@@ -579,10 +670,11 @@ uploadFileInput.addEventListener("change", async () => {
   }
   fitToAllUploaded();
 
+  const notesText = notes.length ? ` Aviso: ${notes.join(" | ")}.` : "";
   if (errors.length === 0) {
-    showUploadStatus(`${ok} archivo${ok === 1 ? "" : "s"} cargado${ok === 1 ? "" : "s"} correctamente.`, "ok");
+    showUploadStatus(`${ok} archivo${ok === 1 ? "" : "s"} cargado${ok === 1 ? "" : "s"} correctamente.${notesText}`, "ok");
   } else {
-    showUploadStatus(`${ok} OK, ${errors.length} con error: ${errors.join(" | ")}`, "error");
+    showUploadStatus(`${ok} OK, ${errors.length} con error: ${errors.join(" | ")}${notesText}`, "error");
   }
   uploadFileInput.value = "";
 });

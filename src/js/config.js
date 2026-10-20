@@ -4,7 +4,8 @@
 // funciones activables, en vez de dos versiones que mantener.
 //
 // Basico: subir trazado, buffer, analisis con semaforo y su porque, capas
-// locales y zonas inundables en linea, Excel, cartografia e informe PDF.
+// locales (incluidas las zonas inundables, desde el 2026-10-20 tambien en
+// data-web/), Excel, cartografia e informe PDF.
 // Solo en completo: redaccion asistida con IA (pendiente de que Quadrante
 // decida que herramientas de IA se pueden usar), buffer propio por capa en los
 // resultados y solapamiento entre tramos subidos.
@@ -32,4 +33,8 @@ const FEATURES = {
   porTramo: APP_MODE === "completo",
   // Red ferroviaria y carreteras del Estado con sus PK (layers.js).
   infraestructuras: APP_MODE === "completo",
+  // Capas ambientales anadidas despues de publicar el piloto (2026-10-20:
+  // montes publicos y DPH probable; l.soloCompleto en layers.js), para que
+  // el enlace del piloto siga mostrando el mismo catalogo.
+  capasNuevas: APP_MODE === "completo",
 };

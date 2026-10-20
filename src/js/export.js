@@ -1361,6 +1361,35 @@ function buildReportPdf() {
     });
   }
 
+  // Capas consultadas con su estado (revision critica 2026-10-19): que se
+  // vea que una capa sin filas arriba si se consulto, o que quedo SIN
+  // RESULTADO. Mismo contenido que la hoja del Excel.
+  let statusY = (pdf.lastAutoTable ? pdf.lastAutoTable.finalY : tableStartY + 6) + 10;
+  if (statusY > pdf.internal.pageSize.getHeight() - 40) {
+    pdf.addPage([297, 210], "landscape");
+    statusY = 18;
+  }
+  sectionTitle("Capas consultadas", statusY);
+  pdf.autoTable({
+    head: [LAYER_STATUS_HEADER],
+    body: layerStatusRows(results).map((row) => row.map((v) => (v === "" || v == null ? "-" : String(v)))),
+    startY: statusY + 3,
+    margin: { left: marginX, right: marginX, bottom: 16 },
+    styles: { fontSize: 7, cellPadding: 1.2, valign: "middle", lineColor: [220, 220, 220], lineWidth: 0.1 },
+    headStyles: { fillColor: REPORT_BLUE, textColor: 255, fontStyle: "bold" },
+    alternateRowStyles: { fillColor: REPORT_BAND },
+    // Suma 261 mm: cabe en los 273 mm utiles del A4 apaisado (con 273
+    // exactos jspdf-autotable avisaba de que no cabia por el relleno).
+    columnStyles: { 0: { cellWidth: 12, halign: "center" }, 1: { cellWidth: 60 }, 2: { cellWidth: 50 }, 3: { cellWidth: 34 }, 4: { cellWidth: 20, halign: "right" }, 5: { cellWidth: 85 } },
+    didParseCell: (data) => {
+      if (data.section === "body" && /^SIN RESULTADO/.test(data.row.raw[LAYER_STATUS_COL])) {
+        data.cell.styles.textColor = [183, 28, 28];
+        data.cell.styles.fontStyle = "bold";
+      }
+    },
+    didDrawPage: drawFooter,
+  });
+
   // Notas de metodologia -- mismo contenido que la hoja "Info" del Excel
   // (analysisNotes en analysis.js).
   const notes = analysisNotes(u, analysisMeta);

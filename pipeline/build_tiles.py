@@ -108,25 +108,38 @@ def run(cmd, **kwargs):
     return result
 
 
-def reproject_single(src: Path, dst_gpkg: Path):
+def subset_args(layer: dict | None) -> list[str]:
+    """Opciones de config.yaml para recortar el origen (2026-10-20):
+    campos: lista de campos que se conservan (el resto no pasa a las teselas
+            y no engorda el .pmtiles);
+    filtro: expresion SQL de atributos (p. ej. excluir un tipo de zona)."""
+    if not layer:
+        return []
+    args = []
+    if layer.get("campos"):
+        args += ["-select", ",".join(layer["campos"])]
+    if layer.get("filtro"):
+        args += ["-where", layer["filtro"]]
+    return args
+
+
+def reproject_single(src: Path, dst_gpkg: Path, layer: dict | None = None):
+    # Sin -nln: la capa conserva el nombre del archivo de origen, que es el
+    # "source-layer" que espera layers.js (p. ej. DPH_DESLINDADO_20250319).
     run(["ogr2ogr", "-f", "GPKG", "-t_srs", "EPSG:4326",
-         "-nlt", "PROMOTE_TO_MULTI", str(dst_gpkg), str(src)])
+         "-nlt", "PROMOTE_TO_MULTI", *subset_args(layer), str(dst_gpkg), str(src)])
 
 
-def reproject_and_merge(sources: list[Path], dst_gpkg: Path):
-    import geopandas as gpd
-    import pandas as pd
-
-    frames = []
-    for src in sources:
-        print(f"  leyendo {src.name} ...")
-        gdf = gpd.read_file(src)
-        if gdf.crs is None:
-            raise RuntimeError(f"{src} no tiene CRS definido (.prj ausente o invalido)")
-        gdf = gdf.to_crs("EPSG:4326")
-        frames.append(gdf)
-    merged = gpd.GeoDataFrame(pd.concat(frames, ignore_index=True), crs="EPSG:4326")
-    merged.to_file(dst_gpkg, driver="GPKG")
+def reproject_and_merge(sources: list[Path], dst_gpkg: Path, layer: dict | None = None):
+    # Antes con geopandas (todo en memoria). Desde 2026-10-20, ogr2ogr por
+    # partes (-append): los montes de utilidad publica son un GeoJSON de
+    # 1,2 GB y este equipo tiene poca RAM libre. Cada fuente se reproyecta
+    # desde su propio CRS (p. ej. peninsula en UTM30 y Canarias en UTM28).
+    for i, src in enumerate(sources):
+        print(f"  anadiendo {src.name} ...")
+        mode = ["-overwrite"] if i == 0 else ["-append", "-addfields"]
+        run(["ogr2ogr", "-f", "GPKG", *mode, "-t_srs", "EPSG:4326", "-nlt", "PROMOTE_TO_MULTI",
+             "-nln", "reproj", *subset_args(layer), str(dst_gpkg), str(src)])
 
 
 def build_layer(layer: dict, data_raw_root: Path, output_dir: Path, tmp_dir: Path):
@@ -149,9 +162,9 @@ def build_layer(layer: dict, data_raw_root: Path, output_dir: Path, tmp_dir: Pat
     tiles_dir = layer_tmp / "tiles"
 
     if len(sources) == 1:
-        reproject_single(sources[0], reproj_gpkg)
+        reproject_single(sources[0], reproj_gpkg, layer)
     else:
-        reproject_and_merge(sources, reproj_gpkg)
+        reproject_and_merge(sources, reproj_gpkg, layer)
 
     run(["ogr2ogr", "-f", "MVT", str(tiles_dir), str(reproj_gpkg),
          "-dsco", f"MINZOOM={layer['minzoom']}",
@@ -222,10 +235,11 @@ def build_label_points(layer: dict, data_raw_root: Path, output_dir: Path, tmp_d
     sources = [ensure_gdal_readable(s, layer_tmp) for s in raw_sources]
 
     reproj_gpkg = layer_tmp / "reproj.gpkg"
+    subset = None if override else layer  # mismos campos/filtro que la capa
     if len(sources) == 1:
-        reproject_single(sources[0], reproj_gpkg)
+        reproject_single(sources[0], reproj_gpkg, subset)
     else:
-        reproject_and_merge(sources, reproj_gpkg)
+        reproject_and_merge(sources, reproj_gpkg, subset)
 
     import geopandas as gpd
 

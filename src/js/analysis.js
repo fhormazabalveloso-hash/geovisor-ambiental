@@ -55,13 +55,29 @@ const ANALYSIS_IDLE_TIMEOUT_MS = 20000;
 const ANALYSIS_INCOMPLETE_NOTE =
   "Puede que alguna capa no terminara de cargar a tiempo (conexión lenta) y falten elementos en este resultado. Repite el análisis antes de usarlo.";
 
-// Hueco de datos conocido, visible en cada resultado: sin estas capas, un
-// "sin afecciones" en una obra de costa o mar puede ser falta de dato
-// (caso de prueba del puerto de Carboneras, §4.6).
+// Huecos de datos conocidos, visibles en cada resultado: sin estas capas, un
+// "sin afecciones" puede ser falta de dato (caso de prueba del puerto de
+// Carboneras, §4.6, para Costas; lista completada tras la revision critica
+// del 2026-10-19). Tambien va al texto para la IA, para que no escriba "no
+// afecta a..." sobre algo que simplemente no se ha mirado.
+const ANALYSIS_NOT_COVERED = [
+  "Dominio Público Marítimo-Terrestre (deslinde de Costas)",
+  "hábitats marinos como la posidonia",
+  // Montes y cauce probable solo estan en el modo completo (FEATURES.capasNuevas).
+  ...(FEATURES.capasNuevas
+    ? ["dominio público hidráulico fuera de los tramos deslindados o estimados (el cauce probable del Proyecto LINDE solo cubre parte de los ríos)"]
+    : ["montes de utilidad pública", "dominio público hidráulico sin deslinde oficial (solo se incluye el deslindado)"]),
+  "patrimonio cultural (BIC, yacimientos arqueológicos)",
+  "especies amenazadas y sus planes de recuperación",
+  "ruido y zonificación acústica",
+  "planeamiento urbanístico",
+  "capas propias de las comunidades autónomas",
+];
 const ANALYSIS_COVERAGE_NOTE =
-  "El catálogo todavía no incluye el Dominio Público Marítimo-Terrestre (deslinde de Costas) ni hábitats marinos como la posidonia. En obras de costa o mar, que no salgan afecciones no las descarta.";
+  `El catálogo no incluye: ${ANALYSIS_NOT_COVERED.join("; ")}. Que no salgan afecciones no las descarta en esos temas. ` +
+  "Las vías pecuarias se miden sobre su eje, sin su anchura legal, y la red hidrográfica es el eje del cauce.";
 
-// Las zonas inundables del SNCZI (capas en linea, ver wfs-layers.js) solo
+// Las zonas inundables del SNCZI (data-web/, pipeline/build_inundables.py) solo
 // existen donde se ha hecho el estudio: en la carretera de prueba de 58 km
 // por Sierra Morena cruzaban 22 cauces con nombre y solo el Guadalquivir
 // tenia zona inundable.
@@ -72,6 +88,29 @@ function serviceErrorsText(meta) {
   if (!meta || !meta.serviceErrors || meta.serviceErrors.length === 0) return "";
   const capas = meta.serviceErrors.map((e) => `${e.nombre} (${e.error})`).join("; ");
   return `No se pudieron consultar estas capas: ${capas}. Quedan SIN RESULTADO, lo que no significa que no haya afección. Repite el análisis más tarde.`;
+}
+
+// Estado de cada capa consultada (revision critica 2026-10-19): antes las
+// capas sin nada desaparecian del resultado, y no se distinguia "consultada,
+// sin hallazgos" de "no se pudo consultar". Mismo texto en el modal, el
+// Excel (hoja "Capas consultadas") y el informe PDF.
+function layerStatusText(r) {
+  if (r.serviceError) return `SIN RESULTADO (${r.serviceError})`;
+  let s = r.count > 0 ? "Con hallazgos en el buffer" : r.nearby.length > 0 ? "Solo elementos cercanos, fuera del buffer" : "Sin hallazgos";
+  if (r.truncated) s += " (respuesta truncada: puede faltar alguno)";
+  return s;
+}
+
+// "Fecha del dato": l.fecha en layers.js, sacada del nombre/version del
+// archivo de origen (pipeline/config.yaml) -- es lo unico verificable que
+// hay; confirmar con el equipo la fecha de descarga antes de una entrega.
+const LAYER_STATUS_HEADER = ["Nivel", "Capa", "Fuente", "Fecha del dato", "Buffer aplicado (m)", "Estado"];
+const LAYER_STATUS_COL = 5; // indice de "Estado"
+
+function layerStatusRows(results) {
+  return [...results]
+    .sort((a, b) => a.layer.nivel - b.layer.nivel)
+    .map((r) => [r.layer.nivel, r.layer.nombre, r.layer.fuente || "", r.layer.fecha || "sin indicar", r.bufferM, layerStatusText(r)]);
 }
 
 // Estados posibles de la verificacion en campo de un hallazgo (idea #6 de
@@ -1333,7 +1372,7 @@ function showAnalysisResults(u, results, meta = {}) {
       <tr><th>Media</th><td>${sensitivityBadgeHtml("Alta")}</td><td>${sensitivityBadgeHtml("Media")}</td><td>${sensitivityBadgeHtml("Baja")}</td></tr>
       <tr><th>Baja</th><td>${sensitivityBadgeHtml("Media")}</td><td>${sensitivityBadgeHtml("Baja")}</td><td>${sensitivityBadgeHtml("Baja")}</td></tr>
     </tbody></table>
-    <p><strong>Importancia alta:</strong> Red Natura 2000, espacios naturales protegidos, zonas húmedas, humedales y turberas, zona de flujo preferente, zona inundable T10. <strong>Media:</strong> dominio público hidráulico, cauces, vías pecuarias, zonas inundables T100/T500 y costeras.</p>
+    <p><strong>Importancia alta:</strong> Red Natura 2000, espacios naturales protegidos, zonas húmedas, humedales y turberas, zona de flujo preferente, zona inundable T10. <strong>Media:</strong> dominio público hidráulico (deslindado y cauce probable), cauces, vías pecuarias, montes públicos, zonas inundables T100/T500 y costeras. <strong>Baja:</strong> zona de policía probable.</p>
     <p>Si la obra lo pisa menos de ${DIRECT_MIN_M} m o ${formatHa(DIRECT_MIN_HA)} ha (<em>roce</em>), o si queda fuera del buffer pero a menos de 50 m o del 10 % de su borde (<em>al borde</em>), cuenta como "en el entorno" y se marca <em>a verificar</em>: la diferencia puede deberse a la precisión del dato. El "cuánto" (ha, m, % del espacio) se da siempre en el porqué de cada fila. Criterio interno de Quadrante, no una clasificación reglamentaria.</p>
   </details>`;
 
@@ -1348,7 +1387,11 @@ function showAnalysisResults(u, results, meta = {}) {
     const cercanas = rows.filter((r) => r.nearby.length > 0);
     html += `<div class="analysis-nivel-block"><h3>${NIVEL_LABEL[nivel]}</h3>`;
     if (afectadas.length === 0) {
-      html += `<p class="analysis-empty">Sin afecciones detectadas en este nivel.</p>`;
+      // Con capas sin resultado en el nivel, "sin afecciones" seria falso.
+      const sinDato = rows.filter((r) => r.serviceError);
+      html += sinDato.length
+        ? `<p class="analysis-empty">Sin afecciones en las capas consultadas de este nivel, pero <strong>${sinDato.length === 1 ? "una capa quedó" : `${sinDato.length} capas quedaron`} SIN RESULTADO</strong> (${escapeHtml(sinDato.map((r) => r.layer.nombre).join(", "))}): no se puede descartar afección.</p>`
+        : `<p class="analysis-empty">Sin afecciones detectadas en este nivel.</p>`;
     } else {
       html += `<table class="analysis-table"><thead><tr>
         <th>Sensibilidad</th><th>Capa</th><th>Afección</th><th>Nombres / códigos</th>${multi ? "<th>Tramos</th>" : ""}<th>Long. en buffer (m)</th><th>Superficie en buffer (ha)</th><th>Confirmado en campo</th>
@@ -1395,6 +1438,16 @@ function showAnalysisResults(u, results, meta = {}) {
     }
     html += `</div>`;
   }
+  // Todas las capas consultadas con su estado (revision critica 2026-10-19).
+  // Plegado salvo que alguna haya quedado sin resultado.
+  const anyNoData = results.some((r) => r.serviceError);
+  html += `<details class="analysis-method analysis-layer-status"${anyNoData ? " open" : ""}>
+    <summary>Capas consultadas (${results.length})${anyNoData ? " · alguna SIN RESULTADO" : ""}</summary>
+    <table class="analysis-table"><thead><tr>${LAYER_STATUS_HEADER.map((h) => `<th>${escapeHtml(h)}</th>`).join("")}</tr></thead><tbody>
+      ${layerStatusRows(results).map((row) => `<tr${/^SIN RESULTADO/.test(row[LAYER_STATUS_COL]) ? ' class="analysis-status-nodata"' : ""}>${row.map((v, i) => `<td${i === LAYER_STATUS_COL - 1 ? ' class="num"' : ""}>${escapeHtml(v)}</td>`).join("")}</tr>`).join("")}
+    </tbody></table>
+  </details>`;
+
   // Primero lo que se quiere ver (resultados y como se decide), y despues los
   // controles para recalcular con otros buffers (prueba del 2026-10-01: con
   // los controles delante, los resultados quedaban fuera de la primera
@@ -1522,8 +1575,8 @@ function analysisNotes(u, meta = {}) {
     ...(isMultiTramo(meta) ? [["Tramos", `${tramoSummaryNote(meta)} El resumen por tramo dice qué hay en el buffer de cada tramo y cómo lo toca; en el Excel, la columna 'Tramos' lo dice además capa a capa.`]] : []),
     ["Cercanos", `Elementos fuera del buffer hasta ${NEAREST_SEARCH_MARGIN_M / 1000} km más allá de él (como mucho ${NEARBY_MAX_PER_LAYER} por capa). La distancia se mide desde el trazado; se marca "AL BORDE DEL BUFFER" si queda a menos de 50 m o del 10 % del buffer fuera de su borde.`],
     ["Cobertura", ANALYSIS_COVERAGE_NOTE],
-    ["Zonas inundables", `${ANALYSIS_FLOOD_COVERAGE_NOTE} Se consultan en vivo al servicio del SNCZI (MITECO) en el momento del análisis; geometría con precisión de ~10 m.`],
-    ["Fuente y vigencia", "Cada capa indica su organismo de origen (columna 'Fuente' en el Excel; debajo del nombre de la capa en el informe). Confirmar la fecha de descarga vigente del catálogo con el equipo antes de una entrega final."],
+    ["Zonas inundables", `${ANALYSIS_FLOOD_COVERAGE_NOTE} Datos del SNCZI (MITECO) guardados en el propio visor: fluviales del 2.º ciclo (enero de 2026); flujo preferente y costeras descargados el 20/10/2026. El borde coincide con el original a ~1 m de media.`],
+    ["Fuente y vigencia", "Cada capa indica su organismo de origen y la fecha de sus datos (tabla 'Capas consultadas'; la fecha sale del archivo de origen del catálogo). Confirmar la fecha de descarga vigente con el equipo antes de una entrega final."],
     ["Sensibilidad", `Combina la importancia del elemento (según su régimen legal) con cómo lo toca la obra. Importancia alta: Muy Alta si la obra lo pisa, Alta si solo está en el buffer, Media si está cerca. Importancia media: Alta / Media / Baja. Si la obra lo pisa menos de ${DIRECT_MIN_M} m o ${formatHa(DIRECT_MIN_HA)} ha ("roce"), o queda fuera del buffer a menos de 50 m o del 10 % de su borde ("al borde"), cuenta como en el buffer y se marca "a verificar". Criterio interno de Quadrante, no una clasificación reglamentaria: sirve para priorizar qué revisar primero y no sustituye el criterio del técnico ambiental.`]
   );
   return notes;
@@ -1666,6 +1719,32 @@ document.getElementById("analysis-download-xlsx").addEventListener("click", asyn
     });
     tSheet.views = [{ state: "frozen", ySplit: 1 }];
   }
+
+  // Hoja "Capas consultadas": todas, con su estado (las que no tienen nada
+  // no salen en "Afecciones"; aqui se ve que si se consultaron).
+  const sSheet = workbook.addWorksheet("Capas consultadas");
+  const statusRows = layerStatusRows(results);
+  sSheet.addTable({
+    name: "TablaCapasConsultadas",
+    ref: "A1",
+    headerRow: true,
+    style: { showRowStripes: false },
+    columns: LAYER_STATUS_HEADER.map((name) => ({ name })),
+    rows: statusRows,
+  });
+  [7, 40, 30, 22, 14, 60].forEach((w, i) => { sSheet.getColumn(i + 1).width = w; });
+  sSheet.getRow(1).eachCell((cell) => {
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: XLSX_HEADER_FILL } };
+    cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+  });
+  statusRows.forEach((row, i) => {
+    if (!/^SIN RESULTADO/.test(row[LAYER_STATUS_COL])) return;
+    sSheet.getRow(i + 2).eachCell((cell) => {
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFEBEE" } };
+      cell.font = { bold: true, color: { argb: "FFB71C1C" } };
+    });
+  });
+  sSheet.views = [{ state: "frozen", ySplit: 1 }];
 
   const infoSheet = workbook.addWorksheet("Info");
   infoSheet.getColumn(1).width = 16;

@@ -5,13 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Geovisor Ambiental - Quadrante</title>
 
-  <link href="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.css" rel="stylesheet" />
+  <!-- Librerias con version EXACTA (2026-10-19): con "@4" el CDN servia la
+       ultima 4.x publicada y una actualizacion externa podia cambiar el
+       comportamiento sin tocar nada aqui. Son las versiones con las que se
+       han hecho las pruebas; subirlas a proposito y volver a probar. -->
+  <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
   <!-- ASSET_VERSION: GitHub Pages deja cada archivo 10 min en la cache del
        navegador (max-age=600). Sin version en la URL, tras publicar se
        mezclaban el HTML nuevo con CSS/JS viejos (2026-10-06: la portada salio
        sin estilos). En cada publicacion, cambiar ?v= (la fecha) en TODOS
        los css/ y js/ propios de este archivo. -->
-  <link href="css/style.css?v=20261006" rel="stylesheet" />
+  <link href="css/style.css?v=20261020p" rel="stylesheet" />
 </head>
 <body>
   <!-- Portada de entrada (2026-10-06, pedido por Francisco): solo presentacion,
@@ -29,8 +33,8 @@
     <p class="portada-pie">Datos oficiales de MITECO, IGN y SNCZI</p>
   </div>
   <!-- config.js antes que la portada: la portada y el pie dicen que version es. -->
-  <script src="js/config.js?v=20261006"></script>
-  <script src="js/portada.js?v=20261006"></script>
+  <script src="js/config.js?v=20261020p"></script>
+  <script src="js/portada.js?v=20261020p"></script>
 
   <div id="app">
     <div id="map-container">
@@ -124,7 +128,7 @@
 
         <div id="export-result" hidden>
           <img id="export-preview" alt="Vista previa de la cartografía exportada">
-          <p id="export-incomplete-note" class="modal-note analysis-incomplete-note" hidden>⚠️ Puede que alguna capa no terminara de cargar a tiempo (conexión lenta o servicio en línea de MITECO no disponible) y falte en esta cartografía. Revisa la vista previa o vuelve a generarla.</p>
+          <p id="export-incomplete-note" class="modal-note analysis-incomplete-note" hidden>⚠️ Puede que alguna capa no terminara de cargar a tiempo (conexión lenta) y falte en esta cartografía. Revisa la vista previa o vuelve a generarla.</p>
           <div class="modal-actions">
             <button id="export-download-png">Descargar PNG</button>
             <button id="export-download-pdf">Descargar PDF</button>
@@ -201,23 +205,23 @@
     </div>
   </div>
 
-  <script src="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.js"></script>
-  <script src="https://unpkg.com/pmtiles@3/dist/pmtiles.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/jspdf@2/dist/jspdf.umd.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3/dist/jspdf.plugin.autotable.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/proj4@2/dist/proj4.js"></script>
-  <script src="https://unpkg.com/shpjs@4/dist/shp.min.js"></script>
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <script src="https://unpkg.com/pmtiles@3.2.1/dist/pmtiles.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.4/dist/jspdf.plugin.autotable.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/proj4@2.22.0/dist/proj4.js"></script>
+  <script src="https://unpkg.com/shpjs@4.0.4/dist/shp.min.js"></script>
   <script src="https://unpkg.com/togeojson@0.16.0/togeojson.js"></script>
-  <script src="https://unpkg.com/jszip@3/dist/jszip.min.js"></script>
-  <script src="https://unpkg.com/exceljs@4/dist/exceljs.min.js"></script>
-  <script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
-  <script src="js/layers.js?v=20261006"></script>
-  <script src="js/main.js?v=20261006"></script>
-  <script src="js/wfs-layers.js?v=20261006"></script>
-  <script src="js/export.js?v=20261006"></script>
-  <script src="js/tramos.js?v=20261006"></script>
-  <script src="js/upload.js?v=20261006"></script>
-  <script src="js/analysis.js?v=20261006"></script>
-  <script src="js/ai-prompt.js?v=20261006"></script>
+  <script src="https://unpkg.com/jszip@3.10.2/dist/jszip.min.js"></script>
+  <script src="https://unpkg.com/exceljs@4.4.0/dist/exceljs.min.js"></script>
+  <script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
+  <script src="js/layers.js?v=20261020p"></script>
+  <script src="js/main.js?v=20261020p"></script>
+  <script src="js/wfs-layers.js?v=20261020p"></script>
+  <script src="js/export.js?v=20261020p"></script>
+  <script src="js/tramos.js?v=20261020p"></script>
+  <script src="js/upload.js?v=20261020p"></script>
+  <script src="js/analysis.js?v=20261020p"></script>
+  <script src="js/ai-prompt.js?v=20261020p"></script>
 </body>
 </html>

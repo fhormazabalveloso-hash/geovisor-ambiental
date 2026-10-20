@@ -861,6 +861,138 @@ Este documento se centra en el **Componente 1**.
     HTML nuevo con el CSS viejo. Ahora todos los CSS y JS propios llevan
     versión en la URL (`style.css?v=20261006`): **en cada publicación hay
     que cambiar esa fecha** en `src/index.html`.
+- **2026-10-13 - Zonas inundables "no disponibles": fallo de MITECO e
+  intermediario local.** Todas las capas del SNCZI salían como "Servicio de
+  MITECO no disponible".
+  - **Causa:** el GeoServer de MITECO (`gis.miteco.gob.es/geoserver`, WFS y
+    WMS) empezó a mandar la cabecera `Access-Control-Allow-Origin: *, *`
+    (duplicada). Desde Python responde bien, con datos, y las capas
+    conservan sus nombres. Los navegadores, en cambio, rechazan una cabecera
+    CORS con dos valores y bloquean la respuesta ("Failed to fetch"). El
+    29/09 la mandaba bien (`*`). Los servicios antiguos de
+    `wms.mapama.gob.es` no son alternativa: devuelven errores internos.
+  - **Arreglo provisional, solo en local:** el nuevo `dev_server.py` sustituye
+    a `python -m RangeHTTPServer`. Sirve igual los rangos y añade la ruta
+    `/miteco-wfs`, que pide los datos a MITECO desde Python y se los entrega
+    al visor desde el mismo origen. `wfs-layers.js` lo usa solo cuando la
+    página se abre en `localhost`.
+  - **La web publicada sigue afectada** mientras MITECO no lo corrija. Allí
+    las capas salen como "no disponible", nunca como "sin afección".
+  - **Pendiente (opción elegida para más adelante):** teselar las láminas de
+    inundación en `data-web/`, como el resto de capas, para no depender del
+    servicio en línea.
+- **2026-10-19 - Revisión crítica y primeros cambios (los de esfuerzo pequeño).**
+  Francisco pidió un análisis crítico del geovisor: qué mide y qué no, con
+  qué precisión y para qué sirve. Lo hizo un agente revisando el código y
+  después se verificaron a mano las afirmaciones principales; una estaba
+  exagerada (sí había aviso de capas sin resultado, aunque contradictorio).
+  Conclusiones y lista priorizada de mejoras en §9. Hechos ya:
+  - **Capas consultadas con su estado.** Una fila por capa: con hallazgos,
+    solo cercanos, sin hallazgos o SIN RESULTADO con su motivo.
+    - Dónde aparece: modal (bloque plegable, abierto si alguna falló), hoja
+      nueva del Excel e informe PDF (`layerStatusRows` en `analysis.js`).
+    - Por qué: antes una capa sin nada desaparecía del resultado.
+    - En un nivel con capas sin resultado ya no pone "Sin afecciones
+      detectadas en este nivel", sino que esas capas quedaron sin resultado.
+  - **Fecha del dato de cada capa** (`fecha` en `layers.js`), sacada del
+    archivo de origen de `pipeline/config.yaml`. Sale en la tabla de capas
+    consultadas.
+  - **Cobertura del catálogo** (`ANALYSIS_NOT_COVERED`).
+    - Lista completa de lo que no se analiza: DPMT, posidonia, montes, DPH
+      sin deslinde, patrimonio, especies, ruido, planeamiento y capas
+      autonómicas.
+    - Aviso de que vías pecuarias y red hidrográfica son ejes.
+  - **Texto para la IA.**
+    - "ELEMENTOS DENTRO DEL BUFFER" en vez de "AFECCIONES DIRECTAS", que
+      mezclaba directa y entorno.
+    - Reglas nuevas: no escribir nunca "no afecta" y tratar lo no cubierto
+      como no analizado.
+    - Recibe el aviso de resultado truncado.
+  - **Validación del archivo subido** (`normalizeUploadedCoords` en
+    `upload.js`).
+    - Un GeoJSON con sistema declarado se convierte a grados: ETRS89 o WGS84
+      UTM 28-31, ED50 UTM 29-31 (aproximado, ±metros) y Web Mercator.
+    - En UTM sin declarar o con latitud y longitud cambiadas se rechaza con
+      un mensaje claro; antes se dibujaba en cualquier parte sin aviso.
+    - Un ZIP con varias capas las carga todas, y avisa; antes solo la
+      primera.
+  - **Librerías con versión exacta** en `index.html`: las que se servían y
+    se habían probado (MapLibre 4.7.1, Turf 6.5.0...), en vez de "@4", que
+    traía la última publicada.
+- **2026-10-20 - Zonas inundables desde el propio repositorio** (decisión de
+  Francisco: "así no dependemos de nada, solo de nuestro repositorio"). Las
+  seis capas del SNCZI dejan el WFS de MITECO, roto en el navegador desde el
+  13/10, y pasan a `data-web/` como el resto.
+  - **Script propio `pipeline/build_inundables.py`:**
+    - Fluviales T10/T100/T500 desde los shapefiles del catálogo (2.º ciclo,
+      enero 2026).
+    - Flujo preferente y costeras T100/T500: no estaban en el catálogo. Se
+      descargan una vez del WFS desde Python, donde el fallo CORS no afecta,
+      y se guardan en `data-raw/snczi/`, fuera de Git.
+    - Solo los campos `id_zona` y `zona`, capa interna `zonas` y archivo de
+      nombres `_labels`.
+  - **Nivel de detalle (prueba del 19/10 con T100 nacional):**
+    - Teselas hasta z11. El análisis nunca baja de zoom 11 y MapLibre amplía
+      por encima.
+    - Borde a ~1 m de media del original (p95 < 5 m), también en las
+      teselas más densas de España (cuenca del Segura). El WFS daba ~10 m.
+    - Hay algún punto aislado peor (hasta ~150 m, probablemente huecos
+      estrechos que desaparecen) y superficies hasta un +2 % en zonas muy
+      densas.
+    - T100 nacional: 34,6 MB. Con z12 pesaría el doble sin ganancia útil.
+    - El tope de 500 KB por tesela de GDAL (`MAX_SIZE`) no influye: con
+      20 MB salen las mismas cifras.
+  - **Ojo al medir la precisión de las teselas:** leerlas tesela a tesela
+    con `CLIP=NO` y corregir antes las geometrías inválidas. Dos mediciones
+    hechas sin eso dieron errores falsos (57 m en Sevilla, −17 % en Murcia).
+  - **En el visor:**
+    - Las seis capas pasan de `wfs` a `sourceLayer: "zonas"` en `layers.js`.
+    - Textos actualizados: grupo "Zonas inundables", nota del Excel y PDF,
+      aviso de la cartografía.
+    - El mecanismo de capas en línea (`wfs-layers.js`) y el intermediario de
+      `dev_server.py` se conservan sin uso, por si hace falta otra capa en
+      línea (p. ej. DPMT).
+  - **Resultado:** las seis capas en `data-web/`, 126 MB en total.
+    - T10: 29,4 MB. T100: 34,5 MB. T500: 34,4 MB.
+    - Flujo preferente: 22,9 MB. Costeras: 2,5 y 2,4 MB.
+    - Cada una con su `_labels`.
+    - Un elemento de flujo preferente pesa más de 20 MB en GeoJSON. Por eso
+      el script quita el tope de GDAL (`OGR_GEOJSON_MAX_OBJ_SIZE=0`) y
+      retoma una descarga cortada.
+- **2026-10-20 - Montes públicos y DPH probable** (siguiente paso acordado con
+  Francisco tras investigar los condicionantes que faltan; informe en
+  `investigacion/condicionantes-que-faltan.md`). Las dos capas ya estaban en
+  el catálogo de Cristian y en `config.yaml`, pero nunca se habían generado
+  por su tamaño.
+  - **Montes** (`montes_utilidad_publica`, nivel 1, importancia media):
+    - `IEPF_CMUP_c` no eran centroides, como suponía `config.yaml`, sino
+      Canarias (EPSG:32628); se unen con `_pb` (Península y Baleares).
+    - 73.452 montes del Inventario Español de Patrimonios Forestales:
+      utilidad pública y otras propiedades.
+    - z11 = 67,3 MB; a z12 eran 97,8 MB, al borde del límite de GitHub.
+    - Los códigos de tipo y propietario (`id_tipo_af`, `id_prop`) siguen sin
+      decodificar: falta el diccionario de datos de MITECO, pendiente de
+      permiso de Francisco para descargarlo.
+  - **DPH probable (Proyecto LINDE, 21/04/2026), partido en dos capas** para
+    que el análisis distinga "ocupa el cauce" (concesión) de "está en la
+    zona de policía" (autorización):
+    - "Cauce probable" (`dph_probable`, importancia media, 5.107 polígonos,
+      31,5 MB).
+    - "Zona de policía probable" (`policia_probable`, importancia baja,
+      4.917 polígonos, 54,7 MB).
+    - La zona de servidumbre (5 m) se excluye.
+    - maxzoom 13 por los cauces estrechos.
+    - Etiquetadas como indicativas: solo cubren parte de los ríos y están
+      sin tramitar.
+  - **`build_tiles.py`:**
+    - Opciones nuevas por capa: `campos` (-select) y `filtro` (-where).
+    - La unión de varias fuentes se hace con `ogr2ogr -append` en vez de
+      geopandas, para no cargar 1,2 GB en memoria.
+    - Las capas de una sola fuente conservan su `source-layer` de siempre.
+  - **`data-web/` pesa ahora 809 MB.** GitHub recomienda que un repositorio
+    no pase de ~1 GB, así que hay que vigilarlo antes de añadir las capas
+    andaluzas. `hic.pmtiles` (12,7 MB) sigue ahí sin usarse y se puede
+    quitar.
 
 ---
 
@@ -1068,20 +1200,24 @@ sigue saliendo de QGIS**; el visor acelera el paso previo (análisis + datos).
   funcionan igual; solo vigilar operaciones más avanzadas (rebase
   interactivo, algunos hooks) que pueden tener menos soporte.
 - **Servidor de desarrollo local:** PMTiles necesita peticiones HTTP por
-  rangos (`Range`), que `python -m http.server` **no soporta bien** - usar
-  `python -m RangeHTTPServer 8000` (paquete `RangeHTTPServer`, ya
-  instalado) desde la **raíz del proyecto** (no desde `src/`, porque
-  `main.js` referencia las capas como `../data-web/*.pmtiles`, relativo a
-  `index.html`). URL de trabajo: `http://localhost:8000/src/index.html`.
-  Configurado como tarea `geovisor-dev` en `.claude/launch.json`.
-  - El servidor no manda cabeceras `Cache-Control`: tras editar un `.js`
-    **o un `.css`**, el navegador a veces sigue sirviendo la versión
-    vieja - recarga forzada (Ctrl+Shift+R) si un cambio no se refleja.
-    (2026-09-23: un cambio de CSS que parecía no aplicarse resultó ser
-    justo esto, no un error del propio CSS.)
-  - Es de un solo hilo: tras muchas peticiones seguidas en una sesión de
-    pruebas intensiva puede quedar lento/colgado - reiniciarlo si el mapa
-    deja de cargar capas.
+  rangos (`Range`), que `python -m http.server` **no soporta bien**. Desde
+  2026-10-13 se usa `python dev_server.py 8000`, que se apoya en el paquete
+  `RangeHTTPServer` (ya instalado). Hay que lanzarlo desde la **raíz del
+  proyecto**, no desde `src/`, porque `main.js` referencia las capas como
+  `../data-web/*.pmtiles`, relativo a `index.html`. URL de trabajo:
+  `http://localhost:8000/src/index.html`. Está configurado como tarea
+  `geovisor-dev` en `.claude/launch.json`. Además de servir los archivos:
+  - **Intermediario `/miteco-wfs`** para las zonas inundables (ver §2,
+    2026-10-13).
+  - **Envía `Cache-Control: no-cache`:** el navegador revalida cada archivo,
+    así que ya no hace falta la recarga forzada tras editar un `.js` o un
+    `.css`. Con el antiguo `RangeHTTPServer` sí hacía falta (2026-09-23: un
+    cambio de CSS que parecía no aplicarse era justo esto). Si una pestaña
+    abierta antes del cambio de servidor sigue mostrando algo viejo, basta
+    una recarga forzada una sola vez.
+  - **Atiende varias peticiones a la vez.** El antiguo era de un solo hilo y
+    se colgaba en sesiones de pruebas intensivas.
+  - **Solo escucha en `127.0.0.1`.**
 
 ---
 
@@ -1312,6 +1448,45 @@ sigue saliendo de QGIS**; el visor acelera el paso previo (análisis + datos).
 
       Después: tipo de obra + "¿qué implica?", y zonas inundables SNCZI
       por WFS.
+- [ ] **Mejoras de la revisión crítica (2026-10-19)**. Los cambios
+      pequeños ya están hechos (ver §2). Quedan, por prioridad:
+      1. **Zoom ≥ 11 en todos los casos.**
+         - Problema: el modo básico y los tramos largos se analizan en una
+           sola vista (z8-9, geometría a 15-30 m). Además, el zoom depende
+           del tamaño de la pantalla.
+         - Propuesta: partir en vistas siempre y mostrar la precisión de
+           cada vista.
+      2. **Doble conteo de líneas.**
+         - Problema: la longitud de ríos y vías pecuarias se suma trozo a
+           trozo, y el solape entre teselas cuenta dos veces el borde.
+         - Propuesta: contar por nombre o id, y subir el maxzoom de la red
+           hidrográfica (hoy z10, ≥ 7 m siempre).
+      3. **Vías pecuarias.**
+         - Medir con su anchura legal, no con el eje.
+         - Opción de "cruce ya existente / obra paralela a infraestructura"
+           que baje un escalón la sensibilidad.
+      4. **Completar el catálogo:** montes y DPH probable HECHO
+         (2026-10-20). Siguen pendientes el DPMT y las capas andaluzas de
+         REDIAM (ver `investigacion/condicionantes-que-faltan.md`).
+      5. **Zonas inundables desde `data-web/`:** HECHO (2026-10-20, ver §2).
+      6. **Banco de casos comparados con QGIS**, para publicar la tolerancia
+         real por capa.
+- [ ] **Caudales máximos (CAUMAX 3.0, CEDEX 2011)**, apuntado el 2026-10-20 a
+      petición de Francisco. Está en la carpeta del catálogo
+      (`03_inundabilidad/caumax_v30`).
+      - **Contenido:** rásteres de 500 m con Q2 a Q500 en régimen natural,
+        solo para cuencas de más de 50 km², más una red de ríos con nombre.
+      - **Cobertura:** solo las 9 demarcaciones intercomunitarias
+        peninsulares. No cubre Tinto-Odiel-Piedras, Guadalete-Barbate,
+        Cuencas Mediterráneas Andaluzas, Galicia-Costa, cuencas internas de
+        Cataluña y País Vasco, Baleares ni Canarias (comprobado con ríos de
+        esas demarcaciones: salen sin dato).
+      - **Uso:** dato hidrológico, no condicionante ambiental. Útil en
+        carreteras y ferrocarril: "Q100 ≈ X m³/s" en cada cruce de cauce,
+        informativo y fuera del semáforo.
+      - **Cuidado:** asignar bien la celda de 500 m al río correcto.
+      - **Esfuerzo:** medio. Dejado para después de las mejoras de la revisión
+        crítica.
 - [ ] (Después) Componente 2 - geovisor de proyectos desde MyMaps
 - [ ] (Después) Componente 3 - geovisor de arqueología (nuevo,
       2026-09-21, sin especificar todavía)

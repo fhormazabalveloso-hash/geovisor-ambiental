@@ -75,14 +75,22 @@ layers:
     nombre: "Montes de Utilidad Pública (CMUP/IEPF)"
     tematica: patrimonio_natural
     nivel: 1
-    # revisar: IEPF_CMUP_c.geojson (7.7 MB, centroides) vs IEPF_CMUP_pb.geojson
-    # (1.19 GB, poligono base) - se tesela el poligono. Fichero grande: primer
-    # candidato a simplificacion agresiva si el .pmtiles resultante pesa
-    # demasiado para Git (ver pipeline/README.md).
+    # Corregido 2026-10-20: _c NO son centroides sino los poligonos de
+    # Canarias (EPSG:32628) y _pb los de Peninsula y Baleares; se unen.
+    # Es el Inventario Espanol de Patrimonios Forestales (MITECO): incluye
+    # los MUP y otras propiedades forestales; id_tipo_af / id_prop son
+    # codigos de tipo y propietario sin decodificar todavia (falta el
+    # diccionario de datos de MITECO, pendiente de permiso para descargarlo).
     fuente:
       - "05_patrimonio_natural\\IEPF_CMUP_GeoJson\\IEPF_CMUP_pb.geojson"
+      - "05_patrimonio_natural\\IEPF_CMUP_GeoJson\\IEPF_CMUP_c.geojson"
+    campos: [id_propfor, cd_monte, monte, elenco, id_tipo_af, id_prop, NUT3_NOM]
     minzoom: 0
-    maxzoom: 13
+    # 73.452 montes: a z12 pesaba 97,8 MB, al borde del limite de GitHub
+    # (100 MB). z11 deja el borde a ~1 m del original (medido con las zonas
+    # inundables, README §2 2026-10-20), de sobra para un cribado.
+    maxzoom: 11
+    label_field: monte
 
   - id: dph_deslindado
     nombre: "DPH deslindado"
@@ -107,15 +115,38 @@ layers:
   # ---------------------------------------------------------------------
   # NIVEL 2 - afección estimada / con matiz (cruce con etiqueta metodológica)
   # ---------------------------------------------------------------------
-  - id: dph_cartografico_probable
-    nombre: "DPH cartográfico probable (Proyecto LINDE)"
+  # DPH cartografico probable (Proyecto LINDE, MITECO, 21/04/2026): 15.070
+  # poligonos de tipos anidados (TIPO_ZONA): "DPH Cartografico" (cauce
+  # probable), "Zona de Servidumbre" (5 m), "Zona de Policia" (100 m) y
+  # "Tramo soterrado". Partido en DOS capas (2026-10-20) para que el analisis
+  # distinga "ocupa el cauce" (concesion) de "esta en la zona de policia"
+  # (autorizacion). La servidumbre se excluye: franjas de 5 m que a escala
+  # de tesela se deforman, y quien la toca toca tambien la policia.
+  # maxzoom 13 (~1 m) por los cauces estrechos. Dato INDICATIVO: solo parte
+  # de los cauces y sin tramitar.
+  - id: dph_probable
+    nombre: "Cauce probable (DPH cartográfico)"
     tematica: hidrografia
     nivel: 2
-    # Fichero de 1.15 GB - candidato a simplificacion / maxzoom reducido.
     fuente:
       - "02_hidrografia\\dph-cartografico-probable\\DHP_PenBalCan_20260421.shp"
+    campos: [ID_ZONA, ZONA, TIPO_ZONA, RIO]
+    filtro: "TIPO_ZONA NOT IN ('Zona de Servidumbre', 'Zona de Policía')"
     minzoom: 0
     maxzoom: 13
+    label_field: RIO
+
+  - id: policia_probable
+    nombre: "Zona de policía probable (100 m)"
+    tematica: hidrografia
+    nivel: 2
+    fuente:
+      - "02_hidrografia\\dph-cartografico-probable\\DHP_PenBalCan_20260421.shp"
+    campos: [ID_ZONA, ZONA, TIPO_ZONA, RIO]
+    filtro: "TIPO_ZONA = 'Zona de Policía'"
+    minzoom: 0
+    maxzoom: 13
+    label_field: RIO
 
   - id: laminas_inundacion_t10
     nombre: "Lámina de inundación T10"

@@ -57,21 +57,25 @@
 // referencia (limites, nucleos) que conviene ver por encima de los
 // rellenos de las demas capas.
 
-// wfs: capa EN LINEA, consultada en vivo al servicio WFS de MITECO (ver
-//        wfs-layers.js) en vez de teselada en data-web/. { typeName }. En el
-//        mapa se carga solo para la vista actual; en el analisis se pide
-//        directamente al servicio para el area de busqueda, sin depender de
-//        lo dibujado. Las geometrias vienen con 4 decimales (~10 m).
+// wfs: capa EN LINEA, consultada en vivo a un servicio WFS (ver
+//        wfs-layers.js) en vez de teselada en data-web/. { typeName }.
+//        Hoy ninguna capa la usa: las zonas inundables, que eran las unicas,
+//        pasaron a data-web/ el 2026-10-20 (ver mas abajo). El mecanismo se
+//        conserva por si hace falta otra capa en linea.
 
 // Zonas inundables del SNCZI (2026-09-29). Las primeras del array para que se
 // dibujen por DEBAJO del resto (son manchas grandes que taparian espacios
 // protegidos y rios); en el panel van en su propio grupo, despues de
 // hidrografia (ver TEMATICA_ORDER). Solo existen para los tramos estudiados
 // por el SNCZI -- ver ANALYSIS_FLOOD_COVERAGE_NOTE en analysis.js.
-const SNCZI_FUENTE = "MITECO - SNCZI, servicio en línea";
+// Desde el 2026-10-20 se sirven desde data-web/ (pipeline/build_inundables.py)
+// y no del WFS de MITECO, que dejo de ser legible desde el navegador el 13/10
+// (cabecera CORS duplicada). Teselas hasta z11: borde a ~1 m del original.
+const SNCZI_FUENTE = "MITECO - SNCZI";
 const FLOOD_LAYERS = [
   {
     id: "zi_costera_t500",
+    fecha: "descarga del SNCZI del 20/10/2026",
     nombre: "Zona inundable costera T500",
     fuente: SNCZI_FUENTE,
     importancia: "Media",
@@ -82,11 +86,12 @@ const FLOOD_LAYERS = [
     color: { fill: "#B2EBF2", line: "#4DB6C4" },
     labelField: "zona",
     idField: "id_zona",
-    wfs: { typeName: "costas:zim_laminas_q500" },
+    sourceLayer: "zonas",
     visibleByDefault: false,
   },
   {
     id: "zi_costera_t100",
+    fecha: "descarga del SNCZI del 20/10/2026",
     nombre: "Zona inundable costera T100",
     fuente: SNCZI_FUENTE,
     importancia: "Media",
@@ -97,11 +102,12 @@ const FLOOD_LAYERS = [
     color: { fill: "#00ACC1", line: "#00838F" },
     labelField: "zona",
     idField: "id_zona",
-    wfs: { typeName: "costas:zim_laminas_q100" },
+    sourceLayer: "zonas",
     visibleByDefault: false,
   },
   {
     id: "zi_t500",
+    fecha: "enero de 2026 (2.º ciclo)",
     nombre: "Zona inundable T500",
     fuente: SNCZI_FUENTE,
     importancia: "Media",
@@ -112,11 +118,12 @@ const FLOOD_LAYERS = [
     color: { fill: "#90CAF9", line: "#5C9BD5" },
     labelField: "zona",
     idField: "id_zona",
-    wfs: { typeName: "agua:Zi_laminas_q500" },
+    sourceLayer: "zonas",
     visibleByDefault: false,
   },
   {
     id: "zi_t100",
+    fecha: "enero de 2026 (2.º ciclo)",
     nombre: "Zona inundable T100",
     fuente: SNCZI_FUENTE,
     importancia: "Media",
@@ -127,11 +134,12 @@ const FLOOD_LAYERS = [
     color: { fill: "#1E88E5", line: "#1565C0" },
     labelField: "zona",
     idField: "id_zona",
-    wfs: { typeName: "agua:Zi_laminas_q100" },
+    sourceLayer: "zonas",
     visibleByDefault: false,
   },
   {
     id: "zi_t10",
+    fecha: "enero de 2026 (2.º ciclo)",
     nombre: "Zona inundable T10",
     fuente: SNCZI_FUENTE,
     importancia: "Alta",
@@ -142,11 +150,12 @@ const FLOOD_LAYERS = [
     color: { fill: "#283593", line: "#1A237E" },
     labelField: "zona",
     idField: "id_zona",
-    wfs: { typeName: "agua:Zi_laminas_q10" },
+    sourceLayer: "zonas",
     visibleByDefault: false,
   },
   {
     id: "zi_zfp",
+    fecha: "descarga del SNCZI del 20/10/2026",
     nombre: "Zona de flujo preferente",
     fuente: SNCZI_FUENTE,
     importancia: "Alta",
@@ -157,7 +166,7 @@ const FLOOD_LAYERS = [
     color: { fill: "#AD1457", line: "#880E4F" },
     labelField: "zona",
     idField: "id_zona",
-    wfs: { typeName: "agua:ZI_Laminas_ZFP" },
+    sourceLayer: "zonas",
     visibleByDefault: false,
   },
 ];
@@ -205,10 +214,12 @@ const INFRA_LAYERS = [
   },
 ];
 
+// soloCompleto: capa solo en el modo completo (FEATURES.capasNuevas, config.js).
 const LAYERS = [
   ...FLOOD_LAYERS,
   {
     id: "red_natura_2000",
+    fecha: "final de 2025",
     nombre: "Red Natura 2000",
     fuente: "MITECO / REDIAM",
     tematica: "espacios_protegidos",
@@ -247,6 +258,7 @@ const LAYERS = [
   },
   {
     id: "enp",
+    fecha: "2025",
     nombre: "Espacios naturales protegidos",
     fuente: "MITECO / REDIAM",
     importancia: "Alta",
@@ -263,6 +275,7 @@ const LAYERS = [
   },
   {
     id: "dph_deslindado",
+    fecha: "19/03/2025",
     // "deslindado" se mantiene a proposito: la capa solo trae los tramos con
     // deslinde oficial, y sin la palabra se leeria como todo el DPH.
     nombre: "Dominio público hidráulico deslindado",
@@ -278,8 +291,47 @@ const LAYERS = [
     idField: "ID_ZONA",
     visibleByDefault: false,
   },
+  // DPH cartografico probable (Proyecto LINDE, 2026-10-20): mismo archivo de
+  // origen partido en dos capas (pipeline/config.yaml) para distinguir
+  // "ocupa el cauce" (concesion) de "esta en la zona de policia"
+  // (autorizacion). Dato INDICATIVO: solo parte de los cauces, sin tramitar.
+  {
+    id: "dph_probable",
+    soloCompleto: true,
+    fecha: "21/04/2026",
+    nombre: "Cauce probable (DPH cartográfico)",
+    fuente: "MITECO - Proyecto LINDE (indicativo, sin tramitar)",
+    importancia: "Media",
+    importanciaMotivo: "dominio público hidráulico probable: concesión del organismo de cuenca (dato indicativo)",
+    tematica: "hidrografia",
+    nivel: 2,
+    sourceLayer: "DHP_PenBalCan_20260421",
+    geom: "polygon",
+    color: { fill: "#4FC3F7", line: "#0277BD" }, // azul celeste: mas claro que el DPH deslindado
+    labelField: "RIO",
+    idField: "ID_ZONA",
+    visibleByDefault: false,
+  },
+  {
+    id: "policia_probable",
+    soloCompleto: true,
+    fecha: "21/04/2026",
+    nombre: "Zona de policía probable (100 m)",
+    fuente: "MITECO - Proyecto LINDE (indicativo, sin tramitar)",
+    importancia: "Baja",
+    importanciaMotivo: "zona de policía (100 m del cauce probable): autorización del organismo de cuenca (dato indicativo)",
+    tematica: "hidrografia",
+    nivel: 2,
+    sourceLayer: "DHP_PenBalCan_20260421",
+    geom: "polygon",
+    color: { fill: "#B3E5FC", line: "#4FC3F7" }, // celeste palido: envuelve al cauce sin taparlo
+    labelField: "RIO",
+    idField: "ID_ZONA",
+    visibleByDefault: false,
+  },
   {
     id: "iezh",
+    fecha: "2025",
     nombre: "Zonas húmedas",
     fuente: "MITECO",
     importancia: "Alta",
@@ -295,6 +347,7 @@ const LAYERS = [
   },
   {
     id: "red_hidrografica",
+    fecha: "sin fecha en el archivo de origen",
     nombre: "Red hidrográfica",
     fuente: "MITECO (Pfafstetter)",
     importancia: "Media",
@@ -317,6 +370,7 @@ const LAYERS = [
   },
   {
     id: "humedales_turberas",
+    fecha: "2025",
     nombre: "Humedales y turberas",
     fuente: "MITECO (complementario a IEZH, vigencia/validez por confirmar)",
     importancia: "Alta",
@@ -335,8 +389,31 @@ const LAYERS = [
     // varias teselas dentro del buffer.
     visibleByDefault: false,
   },
+  // Montes del Inventario Espanol de Patrimonios Forestales (2026-10-20):
+  // peninsula + Baleares y Canarias unidos (pipeline/config.yaml). Incluye
+  // los de utilidad publica y otras propiedades forestales; id_tipo_af e
+  // id_prop (tipo y propietario) siguen sin decodificar hasta tener el
+  // diccionario de datos de MITECO.
+  {
+    id: "montes_utilidad_publica",
+    soloCompleto: true,
+    fecha: "sin fecha en el archivo (copia del catálogo del 01/09/2026)",
+    nombre: "Montes públicos y de utilidad pública",
+    fuente: "MITECO - Inventario Español de Patrimonios Forestales",
+    importancia: "Media",
+    importanciaMotivo: "monte público: ocupación con autorización o concesión (Ley 43/2003 de Montes)",
+    tematica: "patrimonio_natural",
+    nivel: 1,
+    sourceLayer: "reproj",
+    geom: "polygon",
+    color: { fill: "#7CB342", line: "#33691E" }, // verde oliva
+    labelField: "monte",
+    idField: "id_propfor",
+    visibleByDefault: false,
+  },
   {
     id: "vias_pecuarias",
+    fecha: "2024",
     nombre: "Vías pecuarias",
     fuente: "MITECO / REDIAM",
     importancia: "Media",
@@ -353,6 +430,7 @@ const LAYERS = [
   },
   {
     id: "iba",
+    fecha: "05/11/2025",
     nombre: "Áreas importantes para las aves",
     fuente: "SEO/BirdLife",
     tematica: "contexto",
@@ -365,6 +443,7 @@ const LAYERS = [
   },
   {
     id: "nucleos_urbanos",
+    fecha: "2024 (publicado 16/10/2025)",
     nombre: "Núcleos urbanos",
     fuente: "CNIG",
     tematica: "contexto",
@@ -382,7 +461,7 @@ const LAYERS = [
   // pipeline/build_situacion.py) -- ver captureInset en export.js. Los
   // limites_*.pmtiles siguen en data-web/ por si se retoman.
   ...(FEATURES.infraestructuras ? INFRA_LAYERS : []),
-];
+].filter((l) => !l.soloCompleto || FEATURES.capasNuevas);
 
 // Semaforo de sensibilidad (ver nota junto a "importancia" mas arriba) --
 // de menor a mayor, para poder subir/bajar un escalon por indice en
@@ -420,7 +499,7 @@ const TEMATICA_ORDER = ["espacios_protegidos", "hidrografia", "inundabilidad", "
 const TEMATICA_LABEL = {
   espacios_protegidos: "Espacios protegidos",
   hidrografia: "Hidrografía",
-  inundabilidad: "Zonas inundables (en línea)",
+  inundabilidad: "Zonas inundables",
   patrimonio_natural: "Patrimonio natural",
   contexto: "Contexto",
   infraestructuras: "Infraestructuras",

@@ -4,7 +4,7 @@
     {
       "name": "geovisor-dev",
       "runtimeExecutable": "python",
-      "runtimeArgs": ["-m", "RangeHTTPServer", "8000"],
+      "runtimeArgs": ["dev_server.py", "8000"],
       "port": 8000
     }
   ]
